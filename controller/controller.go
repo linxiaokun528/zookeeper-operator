@@ -18,10 +18,10 @@ import (
 	"fmt"
 	"time"
 
-	api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/cluster"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/generated/clientset/versioned"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/k8sutil"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/cluster"
+	"zookeeper-operator/generated/clientset/versioned"
+	"zookeeper-operator/util/k8sutil"
 
 	"github.com/sirupsen/logrus"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"

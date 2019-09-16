@@ -30,6 +30,8 @@ _testmain.go
 # vendor
 vendor/
 
+go.sum
+
 # generated code
-pkg/apis/zookeeper/v1alpha1/zz_generated.deepcopy.go
-pkg/generated
+apis/zookeeper/v1alpha1/zz_generated.deepcopy.go
+generated

@@ -19,8 +19,8 @@ import (
 	"os"
 	"time"
 
-	api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/constants"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/util/constants"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

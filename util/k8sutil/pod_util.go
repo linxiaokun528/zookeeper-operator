@@ -18,8 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	//"github.com/nuance-mobility/zookeeper-operator/pkg/util/zookeeperutil"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	//"zookeeper-operator/util/zookeeperutil"
 
 	"k8s.io/api/core/v1"
 )

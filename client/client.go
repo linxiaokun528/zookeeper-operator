@@ -15,8 +15,8 @@
 package client
 
 import (
-	"github.com/nuance-mobility/zookeeper-operator/pkg/generated/clientset/versioned"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/k8sutil"
+	"zookeeper-operator/generated/clientset/versioned"
+	"zookeeper-operator/util/k8sutil"
 
 	"k8s.io/client-go/rest"
 )

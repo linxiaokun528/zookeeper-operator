@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/zookeeperutil"
+	"zookeeper-operator/util/zookeeperutil"
 
 	"k8s.io/api/core/v1"
 )

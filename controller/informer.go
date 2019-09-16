@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"time"
 
-	api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/k8sutil"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/probe"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/util/k8sutil"
+	"zookeeper-operator/util/probe"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"

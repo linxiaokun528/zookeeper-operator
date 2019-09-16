@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"time"
 
-	api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/retryutil"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/util/retryutil"
 
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"

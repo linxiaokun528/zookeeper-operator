@@ -23,11 +23,11 @@ import (
 	"strings"
 	"time"
 
-	api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/generated/clientset/versioned"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/zookeeperutil"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/k8sutil"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/retryutil"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/generated/clientset/versioned"
+	"zookeeper-operator/util/zookeeperutil"
+	"zookeeper-operator/util/k8sutil"
+	"zookeeper-operator/util/retryutil"
 
 	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
@@ -92,7 +92,7 @@ func New(config Config, cl *api.ZookeeperCluster) *Cluster {
 		eventCh:   make(chan *clusterEvent, 100),
 		stopCh:    make(chan struct{}),
 		status:    *(cl.Status.DeepCopy()),
-		eventsCli: config.KubeCli.Core().Events(cl.Namespace),
+		eventsCli: config.KubeCli.CoreV1().Events(cl.Namespace),
 	}
 
 	go func() {
@@ -380,7 +380,7 @@ func (c *Cluster) removePod(name string, wait bool) error {
 		gracePeriod = int64(0)
 	}
 	opts := metav1.NewDeleteOptions(gracePeriod)
-	err := c.config.KubeCli.Core().Pods(ns).Delete(name, opts)
+	err := c.config.KubeCli.CoreV1().Pods(ns).Delete(name, opts)
 	if err != nil {
 		if !k8sutil.IsKubernetesResourceNotFoundError(err) {
 			return err
@@ -390,7 +390,7 @@ func (c *Cluster) removePod(name string, wait bool) error {
 }
 
 func (c *Cluster) pollPods() (running, pending []*v1.Pod, err error) {
-	podList, err := c.config.KubeCli.Core().Pods(c.cluster.Namespace).List(k8sutil.ClusterListOpt(c.cluster.Name))
+	podList, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).List(k8sutil.ClusterListOpt(c.cluster.Name))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to list running pods: %v", err)
 	}

@@ -23,9 +23,9 @@ import (
 	"strconv"
 	"time"
 
-	api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/zookeeperutil"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/retryutil"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/util/zookeeperutil"
+	"zookeeper-operator/util/retryutil"
 
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
 	"k8s.io/api/core/v1"

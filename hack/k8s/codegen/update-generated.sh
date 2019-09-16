@@ -4,17 +4,13 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-DOCKER_REPO_ROOT="/go/src/github.com/nuance-mobility/zookeeper-operator"
-IMAGE=${IMAGE:-"gcr.io/coreos-k8s-scale-testing/codegen"}
+$GOPATH/pkg/mod/k8s.io/code-generator\@v0.0.0-20190419212335-ff26e7842f9d/generate-groups.sh all zookeeper-operator/generated zookeeper-operator/apis zookeeper:v1alpha1 --go-header-file hack/k8s/codegen/boilerplate.go.txt --output-base=..
 
-docker run --rm \
-  -v "$PWD":"$DOCKER_REPO_ROOT" \
-  -w "$DOCKER_REPO_ROOT" \
-  "$IMAGE" \
-  "/go/src/k8s.io/code-generator/generate-groups.sh"  \
-  "all" \
-  "github.com/nuance-mobility/zookeeper-operator/pkg/generated" \
-  "github.com/nuance-mobility/zookeeper-operator/pkg/apis" \
-  "zookeeper:v1alpha1" \
-  --go-header-file "./hack/k8s/codegen/boilerplate.go.txt" \
-  $@
+# 若用vendor模式，则为：
+# vendor/k8s.io/code-generator/generate-groups.sh all pkg/generated zookeeper-operator/pkg/apis zookeeper:v1alpha1 --go-header-file hack/k8s/codegen/boilerplate.go.txt --output-base=.
+
+#/Users/jelin/go/pkg/mod/k8s.io/code-generator\@v0.0.0-20190419212335-ff26e7842f9d/generate-groups.sh all zookeeper-operator/generated zookeeper-operator/apis zookeeper:v1alpha1 --go-header-file hack/k8s/codegen/boilerplate.go.txt --output-base=..
+
+# 下面这样是错的。或导致生成./zookeeper-operator/apis/zookeeper-operator/vialpha1/zz_generated.deepcopy.go
+# 以及 generated文件夹下的许多文件import 都为 "generated/clientset/versioned/typed/zookeeper/v1alpha1"。但实际应改为"zookeeper-operator/generated/clientset/versioned/typed/zookeeper/v1alpha1"
+# /Users/jelin/go/pkg/mod/k8s.io/code-generator\@v0.0.0-20190419212335-ff26e7842f9d/generate-groups.sh all generated zookeeper-operator/apis zookeeper:v1alpha1 --go-header-file hack/k8s/codegen/boilerplate.go.txt --output-base=.

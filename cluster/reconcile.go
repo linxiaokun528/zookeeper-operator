@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"reflect"
 
-api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-"github.com/nuance-mobility/zookeeper-operator/pkg/util/zookeeperutil"
-"github.com/nuance-mobility/zookeeper-operator/pkg/util/k8sutil"
+api "zookeeper-operator/apis/zookeeper/v1alpha1"
+"zookeeper-operator/util/zookeeperutil"
+"zookeeper-operator/util/k8sutil"
 
 	"k8s.io/api/core/v1"
 )
@@ -215,7 +215,7 @@ func (c *Cluster) removeMember(toRemove *zookeeperutil.Member, isScalingEvent bo
 }
 
 func (c *Cluster) removePVC(pvcName string) error {
-	err := c.config.KubeCli.Core().PersistentVolumeClaims(c.cluster.Namespace).Delete(pvcName, nil)
+	err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Delete(pvcName, nil)
 	if err != nil && !k8sutil.IsKubernetesResourceNotFoundError(err) {
 		return fmt.Errorf("remove pvc (%s) failed: %v", pvcName, err)
 	}

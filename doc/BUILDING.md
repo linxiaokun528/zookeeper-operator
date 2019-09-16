@@ -1,5 +1,6 @@
 Build the operator:
-- `dep ensure`
+- `go list -m -json all`
+- `./hack/k8s/debug/dlv-generator.sh`
 - `./hack/k8s/codegen/update-generated.sh`
 - `./hack/build/operator/build`
-- `docker build -f ./hack/build/operator/Dockerfile .`
+- `docker rmi -f zookeeper-operator:debug && docker build -t zookeeper-operator:debug -f ./hack/build/operator/Dockerfile .`

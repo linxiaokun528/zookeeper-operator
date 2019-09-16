@@ -17,7 +17,7 @@ package cluster
 import (
 	"testing"
 
-	api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

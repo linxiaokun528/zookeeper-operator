@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	api "github.com/nuance-mobility/zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/cluster"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/cluster"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )

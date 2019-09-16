@@ -23,15 +23,15 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/nuance-mobility/zookeeper-operator/pkg/chaos"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/client"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/controller"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/constants"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/k8sutil"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/probe"
-	"github.com/nuance-mobility/zookeeper-operator/pkg/util/retryutil"
-	"github.com/nuance-mobility/zookeeper-operator/version"
-	"github.com/prometheus/client_golang/prometheus"
+	"zookeeper-operator/chaos"
+	"zookeeper-operator/client"
+	"zookeeper-operator/controller"
+	"zookeeper-operator/util/constants"
+	"zookeeper-operator/util/k8sutil"
+	"zookeeper-operator/util/probe"
+	"zookeeper-operator/util/retryutil"
+	"zookeeper-operator/version"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
@@ -73,14 +73,8 @@ func init() {
 }
 
 func main() {
-	namespace = os.Getenv(constants.EnvOperatorPodNamespace)
-	if len(namespace) == 0 {
-		logrus.Fatalf("must set env (%s)", constants.EnvOperatorPodNamespace)
-	}
-	name = os.Getenv(constants.EnvOperatorPodName)
-	if len(name) == 0 {
-		logrus.Fatalf("must set env (%s)", constants.EnvOperatorPodName)
-	}
+	namespace = getEnv(constants.EnvOperatorPodNamespace)
+	name = getEnv(constants.EnvOperatorPodName)
 
 	if printVersion {
 		fmt.Println("zookeeper-operator Version:", version.Version)
@@ -103,13 +97,15 @@ func main() {
 	kubecli := k8sutil.MustNewKubeClient()
 
 	http.HandleFunc(probe.HTTPReadyzEndpoint, probe.ReadyzHandler)
-	http.Handle("/metrics", prometheus.Handler())
+	http.Handle("/metrics", promhttp.Handler())
 	go http.ListenAndServe(listenAddr, nil)
 
-	rl, err := resourcelock.New(resourcelock.EndpointsResourceLock,
+	// TODO: Understand every parameter, and the difference between all lock types
+	rl, err := resourcelock.New(resourcelock.LeasesResourceLock,
 		namespace,
 		"zookeeper-operator",
-		kubecli.CoreV1(),
+		nil,
+		kubecli.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
 			Identity:      id,
 			EventRecorder: createRecorder(kubecli, name, namespace),
@@ -118,7 +114,8 @@ func main() {
 		logrus.Fatalf("error creating lock: %v", err)
 	}
 
-	leaderelection.RunOrDie(leaderelection.LeaderElectionConfig{
+	// TODO: Understand the difference between context.TODO() and context.background()
+	leaderelection.RunOrDie(context.TODO(), leaderelection.LeaderElectionConfig{
 		Lock:          rl,
 		LeaseDuration: 15 * time.Second,
 		RenewDeadline: 10 * time.Second,
@@ -134,7 +131,16 @@ func main() {
 	panic("unreachable")
 }
 
-func run(stop <-chan struct{}) {
+func getEnv(name string) string {
+	value := os.Getenv(name)
+	if len(value) == 0 {
+		logrus.Fatalf("must set env (%s)", name)
+	}
+
+	return value
+}
+
+func run(ctx context.Context) {
 	cfg := newControllerConfig()
 
 	startChaos(context.Background(), cfg.KubeCli, cfg.Namespace, chaosLevel)
@@ -219,6 +225,6 @@ func startChaos(ctx context.Context, kubecli kubernetes.Interface, ns string, ch
 func createRecorder(kubecli kubernetes.Interface, name, namespace string) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(logrus.Infof)
-	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(kubecli.Core().RESTClient()).Events(namespace)})
+	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(kubecli.CoreV1().RESTClient()).Events(namespace)})
 	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: name})
 }
