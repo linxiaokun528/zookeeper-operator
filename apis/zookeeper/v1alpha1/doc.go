@@ -15,5 +15,7 @@ limitations under the License.
 */
 
 // +k8s:deepcopy-gen=package
+// +k8s:defaulter-gen=TypeMeta
+// +k8s:defaulter-gen-input=../../zookeeper/v1alpha1
 // +groupName=zookeeper.database.apache.com
 package v1alpha1

@@ -102,8 +102,8 @@ func WaitCRDReady(clientset apiextensionsclient.Interface, crdName string) error
 	return nil
 }
 
-func MustNewKubeExtClient() apiextensionsclient.Interface {
-	cfg, err := InClusterConfig()
+func MustNewKubeExtClient(masterURL string, kubeconfig string) apiextensionsclient.Interface {
+	cfg, err := InClusterConfig(masterURL, kubeconfig)
 	if err != nil {
 		panic(err)
 	}

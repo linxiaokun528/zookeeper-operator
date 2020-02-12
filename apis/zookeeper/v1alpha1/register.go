@@ -23,14 +23,14 @@ import (
 const (
 	ZookeeperClusterResourceKind   = "ZookeeperCluster"
 	ZookeeperClusterResourcePlural = "zookeeperclusters"
-	groupName                 = "zookeeper.database.apache.com"
+	groupName                      = "zookeeper.database.apache.com"
 )
 
 var (
 	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 	AddToScheme   = SchemeBuilder.AddToScheme
 
-	SchemeGroupVersion = schema.GroupVersion{Group: groupName, Version: "v1alpha1"}
+	SchemeGroupVersion      = schema.GroupVersion{Group: groupName, Version: "v1alpha1"}
 	ZookeeperClusterCRDName = ZookeeperClusterResourcePlural + "." + groupName
 )
 

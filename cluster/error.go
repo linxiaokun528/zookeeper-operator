@@ -34,7 +34,7 @@ func newFatalError(reason string) *fatalError {
 	return &fatalError{reason}
 }
 
-func isFatalError(err error) bool {
+func IsFatalError(err error) bool {
 	switch errors.Cause(err).(type) {
 	case *fatalError:
 		return true

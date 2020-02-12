@@ -15,12 +15,18 @@
 package controller
 
 import (
+	"context"
 	"fmt"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"time"
 
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/cluster"
 	"zookeeper-operator/generated/clientset/versioned"
+	zkInformer "zookeeper-operator/generated/informers/externalversions/zookeeper/v1alpha1"
+	"zookeeper-operator/util"
 	"zookeeper-operator/util/k8sutil"
 
 	"github.com/sirupsen/logrus"
@@ -40,7 +46,11 @@ type Controller struct {
 	logger *logrus.Entry
 	Config
 
-	clusters map[string]*cluster.Cluster
+	ctx      context.Context
+	clusters map[string]*util.Tuple
+
+	eventQueue workqueue.RateLimitingInterface
+	zkInformer zkInformer.ZookeeperClusterInformer
 }
 
 type Config struct {
@@ -49,79 +59,133 @@ type Config struct {
 	ServiceAccount string
 	KubeCli        kubernetes.Interface
 	KubeExtCli     apiextensionsclient.Interface
-	ZookeeperCRCli      versioned.Interface
+	ZookeeperCRCli versioned.Interface
 	CreateCRD      bool
 }
 
-func New(cfg Config) *Controller {
+func New(cfg Config, ctx context.Context) *Controller {
 	return &Controller{
 		logger: logrus.WithField("pkg", "controller"),
 
 		Config:   cfg,
-		clusters: make(map[string]*cluster.Cluster),
+		ctx:      ctx,
+		clusters: make(map[string]*util.Tuple),
 	}
 }
 
-// handleClusterEvent returns true if cluster is ignored (not managed) by this instance.
-func (c *Controller) handleClusterEvent(event *Event) (bool, error) {
-	clus := event.Object
+// ProcessNextWorkItem processes next item in queue by syncHandler
+func (c *Controller) processNextWorkItem() bool {
+	obj, quit := c.eventQueue.Get()
+	if quit {
+		return false
+	}
+	defer c.eventQueue.Done(obj)
 
-	if !c.managed(clus) {
+	key := obj.(string)
+	forget, err := c.syncHandler(key)
+	if err == nil {
+		if forget {
+			c.eventQueue.Forget(key)
+		}
+		return true
+	}
+
+	utilruntime.HandleError(fmt.Errorf("Error syncing job: %v", err))
+	c.eventQueue.AddRateLimited(key)
+
+	return true
+}
+
+func (c *Controller) syncHandler(key string) (bool, error) {
+	ns, name, err := cache.SplitMetaNamespaceKey(key)
+
+	if err != nil {
+		return false, err
+	}
+	if len(ns) == 0 || len(name) == 0 {
+		return false, fmt.Errorf("invalid zookeeper cluster key %q: either namespace or name is missing", key)
+	}
+	sharedCluster, err := c.zkInformer.Lister().ZookeeperClusters(ns).Get(name)
+	sharedCluster = sharedCluster.DeepCopy()
+	zkCluster := cluster.New(c.makeClusterConfig(), sharedCluster)
+	if sharedCluster.Status.Phase == api.ClusterPhaseNone {
+		err = zkCluster.Create()
+		if err != nil {
+			return false, err
+		}
+	}
+
+	start := time.Now()
+	// TODO: we may got nothing here after creating pod
+	running, pending, err := zkCluster.PollPods()
+	// TODO: delete error pods
+
+	if running == nil && pending == nil {
+		// Don't start seed member in create. If we do that, and then delete the seed pod, we will
+		// never generate the seed member again.
+		err = zkCluster.StartSeedMember()
+		if err != nil {
+			return false, err
+		}
+		running, pending, err = zkCluster.PollPods()
+	}
+
+	if err != nil {
+		c.logger.Errorf("fail to poll pods: %v", err)
+		cluster.ReconcileFailed.WithLabelValues("failed to poll pods").Inc()
+		return false, err
+	}
+
+	if len(pending) > 0 {
+		// Pod startup might take long, e.g. pulling image. It would deterministically become running or succeeded/failed later.
+		c.logger.Infof("skip reconciliation: running (%v), pending (%v)", k8sutil.GetPodNames(running), k8sutil.GetPodNames(pending))
+		cluster.ReconcileFailed.WithLabelValues("not all pods are running").Inc()
 		return true, nil
 	}
 
-	if clus.Status.IsFailed() {
-		clustersFailed.Inc()
-		if event.Type == kwatch.Deleted {
-			delete(c.clusters, clus.Name)
-			return false, nil
-		}
-		return false, fmt.Errorf("ignore failed cluster (%s). Please delete its CR", clus.Name)
+	//if len(running) == 0 {
+	// TODO: how to handle this case?
+	//	c.logger.Warningf("all zookeeper pods are dead.")
+	//	return false, nil
+	//}
+
+	// On controller restore, we could have "members == nil"
+	rerr := zkCluster.UpdateMembers(cluster.PodsToMemberSet(running))
+	if rerr != nil {
+		c.logger.Errorf("failed to update members: %v", rerr)
+		return false, rerr
 	}
 
-	clus.SetDefaults()
-
-	if err := clus.Spec.Validate(); err != nil {
-		return false, fmt.Errorf("invalid cluster spec. please fix the following problem with the cluster spec: %v", err)
+	rerr = zkCluster.Reconcile(running)
+	if rerr != nil {
+		c.logger.Errorf("failed to reconcile: %v", rerr)
+		return false, rerr
+	}
+	zkCluster.UpdateMemberStatus(running)
+	if err := zkCluster.UpdateCR(); err != nil {
+		c.logger.Warningf("periodic update CR status failed: %v", err)
 	}
 
-	switch event.Type {
-	case kwatch.Added:
-		if _, ok := c.clusters[clus.Name]; ok {
-			return false, fmt.Errorf("unsafe state. cluster (%s) was created before but we received event (%s)", clus.Name, event.Type)
-		}
+	cluster.ReconcileHistogram.WithLabelValues(sharedCluster.Name).Observe(time.Since(start).Seconds())
 
-		nc := cluster.New(c.makeClusterConfig(), clus)
-
-		c.clusters[clus.Name] = nc
-
-		clustersCreated.Inc()
-		clustersTotal.Inc()
-
-	case kwatch.Modified:
-		if _, ok := c.clusters[clus.Name]; !ok {
-			return false, fmt.Errorf("unsafe state. cluster (%s) was never created but we received event (%s)", clus.Name, event.Type)
-		}
-		c.clusters[clus.Name].Update(clus)
-		clustersModified.Inc()
-
-	case kwatch.Deleted:
-		if _, ok := c.clusters[clus.Name]; !ok {
-			return false, fmt.Errorf("unsafe state. cluster (%s) was never created but we received event (%s)", clus.Name, event.Type)
-		}
-		c.clusters[clus.Name].Delete()
-		delete(c.clusters, clus.Name)
-		clustersDeleted.Inc()
-		clustersTotal.Dec()
+	if rerr != nil {
+		cluster.ReconcileFailed.WithLabelValues(rerr.Error()).Inc()
 	}
+
+	if cluster.IsFatalError(rerr) {
+		sharedCluster.Status.SetReason(rerr.Error())
+		c.logger.Errorf("cluster failed: %v", rerr)
+		zkCluster.ReportFailedStatus()
+		return false, rerr
+	}
+
 	return false, nil
 }
 
 func (c *Controller) makeClusterConfig() cluster.Config {
 	return cluster.Config{
-		ServiceAccount: c.Config.ServiceAccount,
 		KubeCli:        c.Config.KubeCli,
-		ZookeeperCRCli:      c.Config.ZookeeperCRCli,
+		ZookeeperCRCli: c.Config.ZookeeperCRCli,
 	}
 }
 

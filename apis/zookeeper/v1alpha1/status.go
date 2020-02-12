@@ -16,9 +16,9 @@ package v1alpha1
 
 import (
 	"fmt"
-	"time"
-
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"time"
 )
 
 type ClusterPhase string
@@ -37,13 +37,15 @@ const (
 	ClusterConditionUpgrading                       = "Upgrading"
 )
 
+// ClusterStatus represents the current state of a zookeeper cluster.
 type ClusterStatus struct {
 	// Phase is the cluster running phase
-	Phase  ClusterPhase `json:"phase"`
-	Reason string       `json:"reason,omitempty"`
+	Phase ClusterPhase `json:"phase"`
 
-	// ControlPaused indicates the operator pauses the control of the cluster.
-	ControlPaused bool `json:"controlPaused,omitempty"`
+	// Time when first processed
+	StartTime metav1.Time `json:"startTime,omitempty"`
+
+	Reason string `json:"reason,omitempty"`
 
 	// Condition keeps track of all cluster conditions, if they exist.
 	Conditions []ClusterCondition `json:"conditions,omitempty"`
@@ -104,14 +106,6 @@ func (cs *ClusterStatus) IsFailed() bool {
 
 func (cs *ClusterStatus) SetPhase(p ClusterPhase) {
 	cs.Phase = p
-}
-
-func (cs *ClusterStatus) PauseControl() {
-	cs.ControlPaused = true
-}
-
-func (cs *ClusterStatus) Control() {
-	cs.ControlPaused = false
 }
 
 func (cs *ClusterStatus) UpgradeVersionTo(v string) {

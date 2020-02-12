@@ -23,20 +23,18 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"zookeeper-operator/chaos"
 	"zookeeper-operator/client"
 	"zookeeper-operator/controller"
 	"zookeeper-operator/util/constants"
 	"zookeeper-operator/util/k8sutil"
 	"zookeeper-operator/util/probe"
-	"zookeeper-operator/util/retryutil"
 	"zookeeper-operator/version"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	"k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -51,7 +49,8 @@ var (
 	name       string
 	listenAddr string
 	gcInterval time.Duration
-
+	masterURL  string
+	kubeconfig string
 	chaosLevel int
 
 	printVersion bool
@@ -59,6 +58,7 @@ var (
 	createCRD bool
 
 	clusterWide bool
+	leaderElect bool
 )
 
 func init() {
@@ -69,6 +69,10 @@ func init() {
 	flag.BoolVar(&createCRD, "create-crd", true, "The operator will not create the ZookeeperCluster CRD when this flag is set to false.")
 	flag.DurationVar(&gcInterval, "gc-interval", 10*time.Minute, "GC interval")
 	flag.BoolVar(&clusterWide, "cluster-wide", false, "Enable operator to watch clusters in all namespaces")
+	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
+	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
+	flag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader elect")
+
 	flag.Parse()
 }
 
@@ -94,13 +98,12 @@ func main() {
 		logrus.Fatalf("failed to get hostname: %v", err)
 	}
 
-	kubecli := k8sutil.MustNewKubeClient()
+	kubecli := k8sutil.MustNewKubeClient(masterURL, kubeconfig)
 
 	http.HandleFunc(probe.HTTPReadyzEndpoint, probe.ReadyzHandler)
 	http.Handle("/metrics", promhttp.Handler())
 	go http.ListenAndServe(listenAddr, nil)
 
-	// TODO: Understand every parameter, and the difference between all lock types
 	rl, err := resourcelock.New(resourcelock.LeasesResourceLock,
 		namespace,
 		"zookeeper-operator",
@@ -114,19 +117,24 @@ func main() {
 		logrus.Fatalf("error creating lock: %v", err)
 	}
 
-	// TODO: Understand the difference between context.TODO() and context.background()
-	leaderelection.RunOrDie(context.TODO(), leaderelection.LeaderElectionConfig{
-		Lock:          rl,
-		LeaseDuration: 15 * time.Second,
-		RenewDeadline: 10 * time.Second,
-		RetryPeriod:   2 * time.Second,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: run,
-			OnStoppedLeading: func() {
-				logrus.Fatalf("leader election lost")
+	if leaderElect {
+		// TODO: Understand the difference between context.TODO() and context.background()： https://www.cnblogs.com/zhangboyu/p/7456606.html
+		leaderelection.RunOrDie(context.TODO(), leaderelection.LeaderElectionConfig{
+			Lock:          rl,
+			LeaseDuration: 15 * time.Second,
+			RenewDeadline: 10 * time.Second,
+			RetryPeriod:   2 * time.Second,
+			Callbacks: leaderelection.LeaderCallbacks{
+				OnStartedLeading: run,
+				OnStoppedLeading: func() {
+					logrus.Fatalf("leader election lost")
+				},
 			},
-		},
-	})
+		})
+	} else {
+		ctx := context.TODO()
+		run(ctx)
+	}
 
 	panic("unreachable")
 }
@@ -143,46 +151,25 @@ func getEnv(name string) string {
 func run(ctx context.Context) {
 	cfg := newControllerConfig()
 
-	startChaos(context.Background(), cfg.KubeCli, cfg.Namespace, chaosLevel)
+	// startChaos(ctx, cfg.KubeCli, cfg.Namespace, chaosLevel)
 
-	c := controller.New(cfg)
-	err := c.Start()
-	logrus.Fatalf("controller Start() failed: %v", err)
+	c := controller.New(cfg, ctx)
+	c.Start()
 }
 
 func newControllerConfig() controller.Config {
-	kubecli := k8sutil.MustNewKubeClient()
-
-	serviceAccount, err := getMyPodServiceAccount(kubecli)
-	if err != nil {
-		logrus.Fatalf("fail to get my pod's service account: %v", err)
-	}
+	kubecli := k8sutil.MustNewKubeClient(masterURL, kubeconfig)
 
 	cfg := controller.Config{
 		Namespace:      namespace,
 		ClusterWide:    clusterWide,
-		ServiceAccount: serviceAccount,
 		KubeCli:        kubecli,
-		KubeExtCli:     k8sutil.MustNewKubeExtClient(),
-		ZookeeperCRCli:      client.MustNewInCluster(),
+		KubeExtCli:     k8sutil.MustNewKubeExtClient(masterURL, kubeconfig),
+		ZookeeperCRCli: client.MustNewInCluster(masterURL, kubeconfig),
 		CreateCRD:      createCRD,
 	}
 
 	return cfg
-}
-
-func getMyPodServiceAccount(kubecli kubernetes.Interface) (string, error) {
-	var sa string
-	err := retryutil.Retry(5*time.Second, 100, func() (bool, error) {
-		pod, err := kubecli.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
-		if err != nil {
-			logrus.Errorf("fail to get operator pod (%s): %v", name, err)
-			return false, nil
-		}
-		sa = pod.Spec.ServiceAccountName
-		return true, nil
-	})
-	return sa, err
 }
 
 func startChaos(ctx context.Context, kubecli kubernetes.Interface, ns string, chaosLevel int) {
@@ -225,6 +212,8 @@ func startChaos(ctx context.Context, kubecli kubernetes.Interface, ns string, ch
 func createRecorder(kubecli kubernetes.Interface, name, namespace string) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(logrus.Infof)
+	// TODO: what does kubecli.CoreV1().RESTClient()).Events(namespace) do?
+	// When an event happend in leader election, will the EventRecorder send an event to k8s?
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(kubecli.CoreV1().RESTClient()).Events(namespace)})
 	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: name})
 }

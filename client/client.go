@@ -21,8 +21,8 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func MustNewInCluster() versioned.Interface {
-	cfg, err := k8sutil.InClusterConfig()
+func MustNewInCluster(masterURL string, kubeconfig string) versioned.Interface {
+	cfg, err := k8sutil.InClusterConfig(masterURL, kubeconfig)
 	if err != nil {
 		panic(err)
 	}

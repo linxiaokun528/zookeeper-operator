@@ -15,28 +15,21 @@
 package controller
 
 import (
-	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/workqueue"
 	"time"
 
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	zkInformers "zookeeper-operator/generated/informers/externalversions"
 	"zookeeper-operator/util/k8sutil"
 	"zookeeper-operator/util/probe"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	kwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
 
-// TODO: get rid of this once we use workqueue
-var pt *panicTimer
-
-func init() {
-	pt = newPanicTimer(time.Minute, "unexpected long blocking (> 1 Minute) when handling cluster event")
-}
-
-func (c *Controller) Start() error {
+func (c *Controller) Start() {
 	// TODO: get rid of this init code. CRD and storage class will be managed outside of operator.
 	for {
 		err := c.initResource()
@@ -50,32 +43,41 @@ func (c *Controller) Start() error {
 
 	probe.SetReady()
 	c.run()
-	panic("unreachable")
+	//panic("unreachable")
 }
 
 func (c *Controller) run() {
-	var ns string
-	if c.Config.ClusterWide {
-		ns = metav1.NamespaceAll
-	} else {
-		ns = c.Config.Namespace
-	}
+	c.eventQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "events")
+	defer utilruntime.HandleCrash()
+	defer c.eventQueue.ShutDown()
 
-	source := cache.NewListWatchFromClient(
-		c.Config.ZookeeperCRCli.ZookeeperV1alpha1().RESTClient(),
-		api.ZookeeperClusterResourcePlural,
-		ns,
-		fields.Everything())
+	sharedInformerFactory := zkInformers.NewSharedInformerFactory(c.Config.ZookeeperCRCli, time.Second*30)
+	go sharedInformerFactory.Start(c.ctx.Done())
 
-	_, informer := cache.NewIndexerInformer(source, &api.ZookeeperCluster{}, 0, cache.ResourceEventHandlerFuncs{
+	c.zkInformer = sharedInformerFactory.Zookeeper().V1alpha1().ZookeeperClusters()
+	c.zkInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onAddZookeeperClus,
 		UpdateFunc: c.onUpdateZookeeperClus,
 		DeleteFunc: c.onDeleteZookeeperClus,
-	}, cache.Indexers{})
+	})
 
-	ctx := context.TODO()
+	if !cache.WaitForNamedCacheSync("zookeeper", c.ctx.Done(), c.zkInformer.Informer().HasSynced) {
+		return
+	}
+
+	for i := 0; i < 5; i++ {
+		go wait.Until(c.worker, time.Second, c.ctx.Done())
+	}
+
 	// TODO: use workqueue to avoid blocking
-	informer.Run(ctx.Done())
+	c.zkInformer.Informer().Run(c.ctx.Done())
+	c.eventQueue.ShutDown()
+}
+
+func (c *Controller) worker() {
+	// invoked oncely process any until exhausted
+	for c.processNextWorkItem() {
+	}
 }
 
 func (c *Controller) initResource() error {
@@ -89,56 +91,42 @@ func (c *Controller) initResource() error {
 }
 
 func (c *Controller) onAddZookeeperClus(obj interface{}) {
-	c.syncZookeeperClus(obj.(*api.ZookeeperCluster))
+	c.addToQueue(obj)
 }
 
 func (c *Controller) onUpdateZookeeperClus(oldObj, newObj interface{}) {
-	c.syncZookeeperClus(newObj.(*api.ZookeeperCluster))
+	c.logger.Info("test")
+	c.addToQueue(newObj)
 }
 
 func (c *Controller) onDeleteZookeeperClus(obj interface{}) {
-	clus, ok := obj.(*api.ZookeeperCluster)
+	_, ok := obj.(*api.ZookeeperCluster)
 	if !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 		if !ok {
 			panic(fmt.Sprintf("unknown object from ZookeeperCluster delete event: %#v", obj))
 		}
-		clus, ok = tombstone.Obj.(*api.ZookeeperCluster)
+		_, ok = tombstone.Obj.(*api.ZookeeperCluster)
 		if !ok {
 			panic(fmt.Sprintf("Tombstone contained object that is not an ZookeeperCluster: %#v", obj))
 		}
 	}
-	ev := &Event{
-		Type:   kwatch.Deleted,
-		Object: clus,
-	}
-
-	pt.start()
-	_, err := c.handleClusterEvent(ev)
-	if err != nil {
-		c.logger.Warningf("fail to handle event: %v", err)
-	}
-	pt.stop()
+	// Don't need to do anything. If users want to delete the zk cluster, they can specify "--cascade=true"
+	// c.addToQueue(clus)
 }
 
-func (c *Controller) syncZookeeperClus(clus *api.ZookeeperCluster) {
-	ev := &Event{
-		Type:   kwatch.Added,
-		Object: clus,
-	}
-	// re-watch or restart could give ADD event.
-	// If for an ADD event the cluster spec is invalid then it is not added to the local cache
-	// so modifying that cluster will result in another ADD event
-	if _, ok := c.clusters[clus.Name]; ok {
-		ev.Type = kwatch.Modified
+func (c *Controller) addToQueue(obj interface{}) {
+	clus := obj.(*api.ZookeeperCluster)
+	if !c.managed(clus) {
+		return
 	}
 
-	pt.start()
-	_, err := c.handleClusterEvent(ev)
+	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 	if err != nil {
-		c.logger.Warningf("fail to handle event: %v", err)
+		c.logger.Warningf("Couldn't get key for object %+v: %v", obj, err)
+		return
 	}
-	pt.stop()
+	c.eventQueue.Add(key)
 }
 
 func (c *Controller) managed(clus *api.ZookeeperCluster) bool {

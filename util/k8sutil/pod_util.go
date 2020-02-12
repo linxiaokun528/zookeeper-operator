@@ -38,8 +38,8 @@ func zookeeperVolumeMounts() []v1.VolumeMount {
 
 func zookeeperContainer(repo, version string) v1.Container {
 	c := v1.Container{
-		Name:    "zookeeper",
-		Image:   ImageName(repo, version),
+		Name:  "zookeeper",
+		Image: ImageName(repo, version),
 		Ports: []v1.ContainerPort{
 			{
 				Name:          "client",

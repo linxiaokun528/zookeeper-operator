@@ -17,20 +17,19 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
+	"k8s.io/api/core/v1"
 	"math"
 	"os"
 	"reflect"
 	"strings"
 	"time"
-
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/generated/clientset/versioned"
-	"zookeeper-operator/util/zookeeperutil"
 	"zookeeper-operator/util/k8sutil"
 	"zookeeper-operator/util/retryutil"
+	"zookeeper-operator/util/zookeeperutil"
 
 	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -54,9 +53,7 @@ type clusterEvent struct {
 }
 
 type Config struct {
-	ServiceAccount string
-
-	KubeCli   kubernetes.Interface
+	KubeCli        kubernetes.Interface
 	ZookeeperCRCli versioned.Interface
 }
 
@@ -67,48 +64,22 @@ type Cluster struct {
 
 	cluster *api.ZookeeperCluster
 
-	// in memory state of the cluster
-	// status is the source of truth after Cluster struct is materialized.
-	status api.ClusterStatus
-
-	eventCh chan *clusterEvent
-	stopCh  chan struct{}
-
-	// members represents the members in the zookeeper cluster.
+	// Members represents the Members in the zookeeper cluster.
 	// the name of the member is the the name of the pod the member
 	// process runs in.
-	members zookeeperutil.MemberSet
+	Members zookeeperutil.MemberSet
 
 	eventsCli corev1.EventInterface
 }
 
 func New(config Config, cl *api.ZookeeperCluster) *Cluster {
 	lg := logrus.WithField("pkg", "cluster").WithField("cluster-name", cl.Name)
-
 	c := &Cluster{
 		logger:    lg,
 		config:    config,
 		cluster:   cl,
-		eventCh:   make(chan *clusterEvent, 100),
-		stopCh:    make(chan struct{}),
-		status:    *(cl.Status.DeepCopy()),
 		eventsCli: config.KubeCli.CoreV1().Events(cl.Namespace),
 	}
-
-	go func() {
-		if err := c.setup(); err != nil {
-			c.logger.Errorf("cluster failed to setup: %v", err)
-			if c.status.Phase != api.ClusterPhaseFailed {
-				c.status.SetReason(err.Error())
-				c.status.SetPhase(api.ClusterPhaseFailed)
-				if err := c.updateCRStatus(); err != nil {
-					c.logger.Errorf("failed to update cluster phase (%v): %v", api.ClusterPhaseFailed, err)
-				}
-			}
-			return
-		}
-		c.run()
-	}()
 
 	return c
 }
@@ -127,159 +98,19 @@ func (c *Cluster) ResolvePodServiceAddress(member *zookeeperutil.Member) (string
 	return contactPoint, nil
 }
 
-func (c *Cluster) setup() error {
-	var shouldCreateCluster bool
-	switch c.status.Phase {
-	case api.ClusterPhaseNone:
-		shouldCreateCluster = true
-	case api.ClusterPhaseCreating:
-		return errCreatedCluster
-	case api.ClusterPhaseRunning:
-		shouldCreateCluster = false
+func (c *Cluster) Create() error {
+	c.cluster.Status.SetPhase(api.ClusterPhaseCreating)
+	c.cluster.Status.StartTime = metav1.Now()
 
-	default:
-		return fmt.Errorf("unexpected cluster phase: %s", c.status.Phase)
+	if err := c.setupServices(); err != nil {
+		return fmt.Errorf("cluster create: failed to setup service: %v", err)
 	}
-
-	if shouldCreateCluster {
-		return c.create()
-	}
-	return nil
-}
-
-func (c *Cluster) create() error {
-	c.status.SetPhase(api.ClusterPhaseCreating)
-
-	if err := c.updateCRStatus(); err != nil {
+	if err := c.UpdateCR(); err != nil {
 		return fmt.Errorf("cluster create: failed to update cluster phase (%v): %v", api.ClusterPhaseCreating, err)
 	}
 	c.logClusterCreation()
 
-	return c.prepareSeedMember()
-}
-
-func (c *Cluster) prepareSeedMember() error {
-	c.status.SetScalingUpCondition(0, c.cluster.Spec.Size)
-
-	err := c.bootstrap()
-	if err != nil {
-		return err
-	}
-
-	c.status.Size = 1
 	return nil
-}
-
-func (c *Cluster) Delete() {
-	c.logger.Info("cluster is deleted by user")
-	close(c.stopCh)
-}
-
-func (c *Cluster) send(ev *clusterEvent) {
-	select {
-	case c.eventCh <- ev:
-		l, ecap := len(c.eventCh), cap(c.eventCh)
-		if l > int(float64(ecap)*0.8) {
-			c.logger.Warningf("eventCh buffer is almost full [%d/%d]", l, ecap)
-		}
-	case <-c.stopCh:
-	}
-}
-
-func (c *Cluster) run() {
-	if err := c.setupServices(); err != nil {
-		c.logger.Errorf("fail to setup zookeeper services: %v", err)
-	}
-	c.status.ServiceName = k8sutil.ClientServiceName(c.cluster.Name)
-	c.status.ClientPort = k8sutil.ZookeeperClientPort
-
-	c.status.SetPhase(api.ClusterPhaseRunning)
-	if err := c.updateCRStatus(); err != nil {
-		c.logger.Warningf("update initial CR status failed: %v", err)
-	}
-	c.logger.Infof("start running...")
-
-	var rerr error
-	for {
-		select {
-		case <-c.stopCh:
-			return
-		case event := <-c.eventCh:
-			switch event.typ {
-			case eventModifyCluster:
-				err := c.handleUpdateEvent(event)
-				if err != nil {
-					c.logger.Errorf("handle update event failed: %v", err)
-					c.status.SetReason(err.Error())
-					c.reportFailedStatus()
-					return
-				}
-			default:
-				panic("unknown event type" + event.typ)
-			}
-
-		case <-time.After(reconcileInterval):
-			start := time.Now()
-
-			if c.cluster.Spec.Paused {
-				c.status.PauseControl()
-				c.logger.Infof("control is paused, skipping reconciliation")
-				continue
-			} else {
-				c.status.Control()
-			}
-
-			running, pending, err := c.pollPods()
-			if err != nil {
-				c.logger.Errorf("fail to poll pods: %v", err)
-				reconcileFailed.WithLabelValues("failed to poll pods").Inc()
-				continue
-			}
-
-			if len(pending) > 0 {
-				// Pod startup might take long, e.g. pulling image. It would deterministically become running or succeeded/failed later.
-				c.logger.Infof("skip reconciliation: running (%v), pending (%v)", k8sutil.GetPodNames(running), k8sutil.GetPodNames(pending))
-				reconcileFailed.WithLabelValues("not all pods are running").Inc()
-				continue
-			}
-			if len(running) == 0 {
-				// TODO: how to handle this case?
-				c.logger.Warningf("all zookeeper pods are dead.")
-				break
-			}
-
-			// On controller restore, we could have "members == nil"
-			if rerr != nil || c.members == nil {
-				rerr = c.updateMembers(podsToMemberSet(running))
-				if rerr != nil {
-					c.logger.Errorf("failed to update members: %v", rerr)
-					break
-				}
-			}
-			rerr = c.reconcile(running)
-			if rerr != nil {
-				c.logger.Errorf("failed to reconcile: %v", rerr)
-				break
-			}
-			c.updateMemberStatus(running)
-			if err := c.updateCRStatus(); err != nil {
-				c.logger.Warningf("periodic update CR status failed: %v", err)
-			}
-
-			reconcileHistogram.WithLabelValues(c.name()).Observe(time.Since(start).Seconds())
-		}
-
-		if rerr != nil {
-			reconcileFailed.WithLabelValues(rerr.Error()).Inc()
-		}
-
-		if isFatalError(rerr) {
-			c.status.SetReason(rerr.Error())
-			c.logger.Errorf("cluster failed: %v", rerr)
-			c.reportFailedStatus()
-			return
-		}
-	}
 }
 
 func (c *Cluster) handleUpdateEvent(event *clusterEvent) error {
@@ -300,23 +131,21 @@ func (c *Cluster) handleUpdateEvent(event *clusterEvent) error {
 }
 
 func isSpecEqual(s1, s2 api.ClusterSpec) bool {
-	if s1.Size != s2.Size || s1.Paused != s2.Paused || s1.Version != s2.Version {
+	if s1.Size != s2.Size || s1.Version != s2.Version {
 		return false
 	}
 	return true
 }
 
-func (c *Cluster) startSeedMember() error {
+func (c *Cluster) StartSeedMember() error {
 	m := &zookeeperutil.Member{
-		Name:         fmt.Sprintf("%s-1", c.cluster.Name),
-		Namespace:    c.cluster.Namespace,
+		Name:      fmt.Sprintf("%s-1", c.cluster.Name),
+		Namespace: c.cluster.Namespace,
 	}
-	ms := zookeeperutil.NewMemberSet(m)
 	// TODO: @MDF: this fails if someone deletes/recreates a cluster too fast
 	if err := c.createPod(make([]string, 0), m, "seed"); err != nil {
 		return fmt.Errorf("failed to create seed member (%s): %v", m.Name, err)
 	}
-	c.members = ms
 	c.logger.Infof("cluster created with seed member (%s)", m.Name)
 	_, err := c.eventsCli.Create(k8sutil.NewMemberAddEvent(m.Name, c.cluster))
 	if err != nil {
@@ -324,18 +153,6 @@ func (c *Cluster) startSeedMember() error {
 	}
 
 	return nil
-}
-
-// bootstrap creates the seed zookeeper member for a new cluster.
-func (c *Cluster) bootstrap() error {
-	return c.startSeedMember()
-}
-
-func (c *Cluster) Update(cl *api.ZookeeperCluster) {
-	c.send(&clusterEvent{
-		typ:     eventModifyCluster,
-		cluster: cl,
-	})
 }
 
 func (c *Cluster) setupServices() error {
@@ -358,16 +175,16 @@ func (c *Cluster) createPod(existingCluster []string, m *zookeeperutil.Member, s
 	pod := k8sutil.NewZookeeperPod(m, existingCluster, c.cluster.Name, state, c.cluster.Spec, c.cluster.AsOwner())
 	// TODO: @MDF: add PV support
 	/*
-	if c.isPodPVEnabled() {
-		pvc := k8sutil.NewZookeeperPodPVC(m, *c.cluster.Spec.Pod.PersistentVolumeClaimSpec, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner())
-		_, err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Create(pvc)
-		if err != nil {
-			return fmt.Errorf("failed to create PVC for member (%s): %v", m.Name, err)
+		if c.isPodPVEnabled() {
+			pvc := k8sutil.NewZookeeperPodPVC(m, *c.cluster.Spec.Pod.PersistentVolumeClaimSpec, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner())
+			_, err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Create(pvc)
+			if err != nil {
+				return fmt.Errorf("failed to create PVC for member (%s): %v", m.Name, err)
+			}
+			k8sutil.AddZookeeperVolumeToPod(pod, pvc)
+		} else {
+			k8sutil.AddZookeeperVolumeToPod(pod, nil)
 		}
-		k8sutil.AddZookeeperVolumeToPod(pod, pvc)
-	} else {
-		k8sutil.AddZookeeperVolumeToPod(pod, nil)
-	}
 	*/
 	_, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Create(pod)
 	return err
@@ -389,7 +206,7 @@ func (c *Cluster) removePod(name string, wait bool) error {
 	return nil
 }
 
-func (c *Cluster) pollPods() (running, pending []*v1.Pod, err error) {
+func (c *Cluster) PollPods() (running, pending []*v1.Pod, err error) {
 	podList, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).List(k8sutil.ClusterListOpt(c.cluster.Name))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to list running pods: %v", err)
@@ -411,6 +228,19 @@ func (c *Cluster) pollPods() (running, pending []*v1.Pod, err error) {
 				pod.Name, pod.OwnerReferences[0].UID, c.cluster.UID)
 			continue
 		}
+		if pod.Labels["app"] != "zookeeper" {
+			c.logger.Warningf("pollPods: ignore pod %v: label app (%v) is not \"zookeeper\"",
+				pod.Name, pod.Labels["app"])
+			continue
+		}
+
+		if pod.Labels["zookeeper_cluster"] != c.cluster.Name {
+			c.logger.Warningf("pollPods: ignore pod %v: label zookeeper_cluster (%v) is not %v",
+				pod.Name, pod.Labels["zookeeper_cluster"], c.cluster.Name)
+			continue
+		}
+
+		// TODO: release pods whose owner is c.cluster, but the label doesn't match.
 		switch pod.Status.Phase {
 		case v1.PodRunning:
 			running = append(running, pod)
@@ -422,7 +252,7 @@ func (c *Cluster) pollPods() (running, pending []*v1.Pod, err error) {
 	return running, pending, nil
 }
 
-func (c *Cluster) updateMemberStatus(running []*v1.Pod) {
+func (c *Cluster) UpdateMemberStatus(running []*v1.Pod) {
 	var unready []string
 	var ready []string
 	for _, pod := range running {
@@ -433,34 +263,28 @@ func (c *Cluster) updateMemberStatus(running []*v1.Pod) {
 		unready = append(unready, pod.Name)
 	}
 
-	c.status.Members.Ready = ready
-	c.status.Members.Unready = unready
+	c.cluster.Status.Members.Ready = ready
+	c.cluster.Status.Members.Unready = unready
 }
 
-func (c *Cluster) updateCRStatus() error {
-	if reflect.DeepEqual(c.cluster.Status, c.status) {
-		return nil
-	}
-
-	newCluster := c.cluster
-	newCluster.Status = c.status
+func (c *Cluster) UpdateCR() error {
 	newCluster, err := c.config.ZookeeperCRCli.ZookeeperV1alpha1().ZookeeperClusters(c.cluster.Namespace).Update(c.cluster)
 	if err != nil {
-		return fmt.Errorf("failed to update CR status: %v", err)
+		return fmt.Errorf("failed to update CR: %v", err)
 	}
 
-	c.cluster = newCluster
+	c.cluster = newCluster.DeepCopy()
 
 	return nil
 }
 
-func (c *Cluster) reportFailedStatus() {
+func (c *Cluster) ReportFailedStatus() {
 	c.logger.Info("cluster failed. Reporting failed reason...")
 
 	retryInterval := 5 * time.Second
 	f := func() (bool, error) {
-		c.status.SetPhase(api.ClusterPhaseFailed)
-		err := c.updateCRStatus()
+		c.cluster.Status.SetPhase(api.ClusterPhaseFailed)
+		err := c.UpdateCR()
 		if err == nil || k8sutil.IsKubernetesResourceNotFoundError(err) {
 			return true, nil
 		}
@@ -496,7 +320,7 @@ func (c *Cluster) name() string {
 func (c *Cluster) logClusterCreation() {
 	specBytes, err := json.MarshalIndent(c.cluster.Spec, "", "    ")
 	if err != nil {
-		c.logger.Errorf("failed to marshal cluster spec: %v", err)
+		c.logger.Errorf("failed to marshal spec of cluster %s: %v", c.cluster.Name, err)
 	}
 
 	c.logger.Info("creating cluster with Spec:")

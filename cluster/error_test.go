@@ -40,7 +40,7 @@ func TestWrapFatalError(t *testing.T) {
 	}}
 
 	for i, tt := range tests {
-		f := isFatalError(tt.err)
+		f := IsFatalError(tt.err)
 		if f != tt.isFatal {
 			t.Errorf("#%d: isFatal want=%v, get=%v", i, tt.isFatal, f)
 		}

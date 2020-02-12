@@ -1,3 +1,5 @@
+package util
+
 // Copyright 2018 The zookeeper-operator Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,9 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package constants
+type Tuple struct {
+	First  interface{}
+	Second interface{}
+}
 
-const (
-	EnvOperatorPodName      = "MY_POD_NAME"
-	EnvOperatorPodNamespace = "MY_POD_NAMESPACE"
-)
+func NewTuple(first, second interface{}) *Tuple {
+	return &Tuple{first, second}
+}

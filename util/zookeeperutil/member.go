@@ -123,7 +123,7 @@ func (ms MemberSet) ClientHostList() []string {
 func (ms MemberSet) ClusterConfig() []string {
 	clusterConfig := make([]string, 0)
 	for _, m := range ms {
-		clusterConfig = append(clusterConfig, fmt.Sprintf("server.%d=%s:2888:3888:participant;%s:2181", m.ID(), m.Addr(), m.Addr()))
+		clusterConfig = append(clusterConfig, fmt.Sprintf("server.%d=%s:2888:3888:participant;0.0.0.0:2181", m.ID(), m.Addr()))
 	}
 	sort.Strings(clusterConfig)
 	return clusterConfig

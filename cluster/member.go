@@ -23,7 +23,7 @@ import (
 	"k8s.io/api/core/v1"
 )
 
-func (c *Cluster) updateMembers(known zookeeperutil.MemberSet) error {
+func (c *Cluster) UpdateMembers(known zookeeperutil.MemberSet) error {
 	resp, err := zookeeperutil.GetClusterConfig(known.ClientHostList())
 	if err != nil {
 		return err
@@ -31,28 +31,27 @@ func (c *Cluster) updateMembers(known zookeeperutil.MemberSet) error {
 
 	members := zookeeperutil.MemberSet{}
 	for _, serverConfig := range resp {
-		leaderClientSplit := strings.Split(serverConfig, ";")
-		clientHostname := strings.Split(leaderClientSplit[1], ":")[0]
-		clientName := strings.Split(clientHostname, ".")[0]
+		leaderClientSplit := strings.Split(serverConfig, "=")
+		clientName := strings.Split(leaderClientSplit[1], ".")[0]
 		members[clientName] = &zookeeperutil.Member{
-			Name:         clientName,
-			Namespace:    c.cluster.Namespace,
+			Name:      clientName,
+			Namespace: c.cluster.Namespace,
 		}
 
 	}
-	c.members = members
+	c.Members = members
 	return nil
 }
 
 func (c *Cluster) newMember() *zookeeperutil.Member {
-	name := fmt.Sprintf("%s-%d", c.cluster.Name, c.members.MaxMemberID()+1)
+	name := fmt.Sprintf("%s-%d", c.cluster.Name, c.Members.MaxMemberID()+1)
 	return &zookeeperutil.Member{
-		Name:         name,
-		Namespace:    c.cluster.Namespace,
+		Name:      name,
+		Namespace: c.cluster.Namespace,
 	}
 }
 
-func podsToMemberSet(pods []*v1.Pod) zookeeperutil.MemberSet {
+func PodsToMemberSet(pods []*v1.Pod) zookeeperutil.MemberSet {
 	members := zookeeperutil.MemberSet{}
 	for _, pod := range pods {
 		m := &zookeeperutil.Member{Name: pod.Name, Namespace: pod.Namespace}

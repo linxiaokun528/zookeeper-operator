@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	defaultRepository  = "blafrisch/zookeeper"
+	defaultRepository       = "blafrisch/zookeeper"
 	DefaultZookeeperVersion = "3.5.3-beta"
 )
 
@@ -39,6 +39,7 @@ type ZookeeperClusterList struct {
 }
 
 // +genclient
+// +genclient:noStatus
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 type ZookeeperCluster struct {
@@ -91,9 +92,6 @@ type ClusterSpec struct {
 	//
 	// If version is not set, default is "3.5.3-beta".
 	Version string `json:"version,omitempty"`
-
-	// Paused is to pause the control of the operator for the zookeeper cluster.
-	Paused bool `json:"paused,omitempty"`
 
 	// Pod defines the policy to create pod for the zookeeper pod.
 	//
@@ -156,11 +154,11 @@ type PodPolicy struct {
 // TODO: move this to initializer
 func (c *ClusterSpec) Validate() error {
 	/*
-	if c.TLS != nil {
-		if err := c.TLS.Validate(); err != nil {
-			return err
+		if c.TLS != nil {
+			if err := c.TLS.Validate(); err != nil {
+				return err
+			}
 		}
-	}
 	*/
 
 	if c.Pod != nil {

@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-var reconcileHistogram = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+var ReconcileHistogram = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: "zookeeper_operator",
 	Subsystem: "cluster",
 	Name:      "reconcile_duration",
@@ -28,7 +28,7 @@ var reconcileHistogram = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	[]string{"ClusterName"},
 )
 
-var reconcileFailed = prometheus.NewCounterVec(prometheus.CounterOpts{
+var ReconcileFailed = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: "zookeeper_operator",
 	Subsystem: "cluster",
 	Name:      "reconcile_failed",
@@ -38,6 +38,6 @@ var reconcileFailed = prometheus.NewCounterVec(prometheus.CounterOpts{
 )
 
 func init() {
-	prometheus.MustRegister(reconcileHistogram)
-	prometheus.MustRegister(reconcileFailed)
+	prometheus.MustRegister(ReconcileHistogram)
+	prometheus.MustRegister(ReconcileFailed)
 }

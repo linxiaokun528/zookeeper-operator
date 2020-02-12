@@ -17,15 +17,16 @@ package k8sutil
 import (
 	"encoding/json"
 	"fmt"
+	"k8s.io/client-go/tools/clientcmd"
 	"net"
 	"os"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/util/zookeeperutil"
 	"zookeeper-operator/util/retryutil"
+	"zookeeper-operator/util/zookeeperutil"
 
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
 	"k8s.io/api/core/v1"
@@ -45,8 +46,8 @@ const (
 	// ZookeeperClientPort is the client port on client service and zookeeper nodes.
 	ZookeeperClientPort = 2181
 
-	zookeeperDataVolumeMountDir = "/data"
-	zookeeperTlogVolumeMountDir = "/datalog"
+	zookeeperDataVolumeMountDir   = "/data"
+	zookeeperTlogVolumeMountDir   = "/datalog"
 	zookeeperVersionAnnotationKey = "zookeeper.version"
 
 	randomSuffixLength = 10
@@ -187,6 +188,13 @@ func CreateAndWaitPod(kubecli kubernetes.Interface, ns string, pod *v1.Pod, time
 
 func newZookeeperServiceManifest(svcName, clusterName, clusterIP string, ports []v1.ServicePort) *v1.Service {
 	labels := LabelsForCluster(clusterName)
+	//TODO: Delete this in the final code
+	//if clusterIP == "None" {
+	//	clusterIP = ""
+	//	for i, _ := range ports {
+	//		ports[i].NodePort = ports[i].Port
+	//	}
+	//}
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   svcName,
@@ -196,11 +204,16 @@ func newZookeeperServiceManifest(svcName, clusterName, clusterIP string, ports [
 			},
 		},
 		Spec: v1.ServiceSpec{
+			//TODO: Delete this in the final code
+			//ExternalTrafficPolicy: "Local",
 			Ports:     ports,
 			Selector:  labels,
 			ClusterIP: clusterIP,
+			//TODO: Delete this in the final code
+			//Type: "NodePort",
 		},
 	}
+
 	return svc
 }
 
@@ -223,7 +236,7 @@ func addOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 
 func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterName, state string, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
 	labels := map[string]string{
-		"app":          "zookeeper",
+		"app":               "zookeeper",
 		"zookeeper_node":    m.Name,
 		"zookeeper_cluster": clusterName,
 	}
@@ -243,9 +256,9 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 	zooServers := make([]string, len(existingCluster)+1)
 	copy(zooServers, existingCluster)
 	if state == "seed" || state == "replacement" {
-		zooServers[len(existingCluster)] = fmt.Sprintf("server.%d=%s:2888:3888:participant;%s:2181", m.ID(), m.Addr(), m.Addr())
+		zooServers[len(existingCluster)] = fmt.Sprintf("server.%d=%s:2888:3888:participant;0.0.0.0:2181", m.ID(), m.Addr())
 	} else {
-		zooServers[len(existingCluster)] = fmt.Sprintf("server.%d=%s:2888:3888:observer;%s:2181", m.ID(), m.Addr(), m.Addr())
+		zooServers[len(existingCluster)] = fmt.Sprintf("server.%d=%s:2888:3888:observer;0.0.0.0:2181", m.ID(), m.Addr())
 	}
 
 	container.Env = append(container.Env, v1.EnvVar{
@@ -317,15 +330,15 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 	return pod
 }
 
-func MustNewKubeClient() kubernetes.Interface {
-	cfg, err := InClusterConfig()
+func MustNewKubeClient(masterURL string, kubeconfig string) kubernetes.Interface {
+	cfg, err := InClusterConfig(masterURL, kubeconfig)
 	if err != nil {
 		panic(err)
 	}
 	return kubernetes.NewForConfigOrDie(cfg)
 }
 
-func InClusterConfig() (*rest.Config, error) {
+func InClusterConfig(masterURL string, kubeconfig string) (*rest.Config, error) {
 	// Work around https://github.com/kubernetes/kubernetes/issues/40973
 	// See https://github.com/coreos/etcd-operator/issues/731#issuecomment-283804819
 	if len(os.Getenv("KUBERNETES_SERVICE_HOST")) == 0 {
@@ -338,7 +351,9 @@ func InClusterConfig() (*rest.Config, error) {
 	if len(os.Getenv("KUBERNETES_SERVICE_PORT")) == 0 {
 		os.Setenv("KUBERNETES_SERVICE_PORT", "443")
 	}
-	cfg, err := rest.InClusterConfig()
+
+	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
+	// cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +380,7 @@ func ClusterListOpt(clusterName string) metav1.ListOptions {
 func LabelsForCluster(clusterName string) map[string]string {
 	return map[string]string{
 		"zookeeper_cluster": clusterName,
-		"app":          "zookeeper",
+		"app":               "zookeeper",
 	}
 }
 
