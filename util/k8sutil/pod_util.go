@@ -80,7 +80,12 @@ func containerWithRequirements(c v1.Container, r v1.ResourceRequirements) v1.Con
 }
 
 func newZookeeperProbe() *v1.Probe {
-	cmd := fmt.Sprintf("zkOk.sh %d", ZookeeperClientPort)
+	cmd := fmt.Sprintf(`OK=$(echo ruok | nc $(hostname) 2181)
+if [ "$OK" == "imok" ]; then
+        exit 0
+else
+        exit 1
+fi`)
 	return &v1.Probe{
 		Handler: v1.Handler{
 			Exec: &v1.ExecAction{
