@@ -179,7 +179,11 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 		return false, rerr
 	}
 
-	return false, nil
+	if len(running) == sharedCluster.Spec.Size {
+		return true, nil
+	} else {
+		return false, nil
+	}
 }
 
 func (c *Controller) makeClusterConfig() cluster.Config {

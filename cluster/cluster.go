@@ -187,7 +187,37 @@ func (c *Cluster) createPod(existingCluster []string, m *zookeeperutil.Member, s
 		}
 	*/
 	_, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Create(pod)
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
+	//podInformer, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Watch(metav1.ListOptions{
+	//	LabelSelector: "app=zookeeper,zookeeper_cluster=" + c.cluster.Name,
+	//	FieldSelector:"metadata.name=" + pod.Name,
+	//})
+	//if err != nil {
+	//	return err
+	//}
+	//defer func() {
+	//	podInformer.Stop()
+	//}()
+	//
+	//// TODO: Seperate this into another function
+	//for {
+	//	select {
+	//	case event := <-podInformer.ResultChan():
+	//		if event.Type == watch.Added || event.Type == watch.Modified {
+	//			pod := event.Object.DeepCopyObject().(*v1.Pod)
+	//			if pod.Status.Phase == v1.PodRunning {
+	//				return nil
+	//			}
+	//		} else if event.Type == watch.Deleted {
+	//			return fmt.Errorf("Pod %v is deleted!", pod.Name)
+	//		} else if event.Type == watch.Error {
+	//			return fmt.Errorf("Error %v happend when watching Pod %v",event.Object, pod.Name)
+	//		}
+	//	}
+	//}
 }
 
 func (c *Cluster) removePod(name string, wait bool) error {
