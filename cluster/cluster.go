@@ -70,6 +70,13 @@ type Cluster struct {
 	Members zookeeperutil.MemberSet
 
 	eventsCli corev1.EventInterface
+
+	// Pods running as zookeeper members
+	runningPods []*v1.Pod
+
+	// Pods are running and ready to be zookeeper members.
+	// Need to reconfigure zookeeper cluster to make these members become zookeeper members.
+	readyPods []*v1.Pod
 }
 
 func New(config Config, cl *api.ZookeeperCluster) *Cluster {
@@ -113,6 +120,57 @@ func (c *Cluster) Create() error {
 	return nil
 }
 
+func (c *Cluster) Sync() error {
+	running, ready, unready, err := c.getLivingPodsAndDeleteStoppedPods()
+	if err != nil {
+		return nil
+	}
+
+	c.runningPods = running
+	c.readyPods = ready
+	if c.runningPods == nil && unready == nil {
+		// Don't start seed member in create. If we do that, and then delete the seed pod, we will
+		// never generate the seed member again.
+		err = c.StartSeedMember()
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(unready) > 0 {
+		// Pod startup might take long, e.g. pulling image. It would deterministically become ready or succeeded/failed later.
+		c.logger.Infof("skip reconciliation: ready (%v), unready (%v)", k8sutil.GetPodNames(ready), k8sutil.GetPodNames(unready))
+		ReconcileFailed.WithLabelValues("not all pods are ready").Inc()
+		return nil
+	}
+
+	if len(c.runningPods) == 0 {
+		return nil
+	}
+
+	// On controller restore, we could have "members == nil"
+	rerr := c.UpdateMembers()
+	if rerr != nil {
+		c.logger.Errorf("failed to update members: %v", rerr)
+		return rerr
+	}
+
+	rerr = c.Reconcile()
+	if rerr != nil {
+		c.logger.Errorf("failed to reconcile: %v", rerr)
+		return rerr
+	}
+	c.UpdateMemberStatus()
+	if err := c.UpdateCR(); err != nil {
+		c.logger.Warningf("periodic update CR status failed: %v", err)
+	}
+	return nil
+}
+
+func (c *Cluster) IsFinished() bool {
+	return len(c.runningPods) == c.cluster.Spec.Size
+}
+
 func (c *Cluster) handleUpdateEvent(event *clusterEvent) error {
 	oldSpec := c.cluster.Spec.DeepCopy()
 	c.cluster = event.cluster
@@ -143,11 +201,17 @@ func (c *Cluster) StartSeedMember() error {
 		Namespace: c.cluster.Namespace,
 	}
 	// TODO: @MDF: this fails if someone deletes/recreates a cluster too fast
-	if err := c.createPod(make([]string, 0), m, "seed"); err != nil {
+	pod, err := c.createPod(make([]string, 0), m, "seed")
+	if err != nil {
 		return fmt.Errorf("failed to create seed member (%s): %v", m.Name, err)
 	}
+	// Almost impossible, but ...
+	if k8sutil.IsPodReady(pod) {
+		c.runningPods = append(c.runningPods, pod)
+	}
+
 	c.logger.Infof("cluster created with seed member (%s)", m.Name)
-	_, err := c.eventsCli.Create(k8sutil.NewMemberAddEvent(m.Name, c.cluster))
+	_, err = c.eventsCli.Create(k8sutil.NewMemberAddEvent(m.Name, c.cluster))
 	if err != nil {
 		c.logger.Errorf("failed to create new member add event: %v", err)
 	}
@@ -171,8 +235,8 @@ func (c *Cluster) isPodPVEnabled() bool {
 	return false
 }
 
-func (c *Cluster) createPod(existingCluster []string, m *zookeeperutil.Member, state string) error {
-	pod := k8sutil.NewZookeeperPod(m, existingCluster, c.cluster.Name, state, c.cluster.Spec, c.cluster.AsOwner())
+func (c *Cluster) createPod(existingCluster []string, m *zookeeperutil.Member, state string) (pod *v1.Pod, err error) {
+	pod = k8sutil.NewZookeeperPod(m, existingCluster, c.cluster.Name, state, c.cluster.Spec, c.cluster.AsOwner())
 	// TODO: @MDF: add PV support
 	/*
 		if c.isPodPVEnabled() {
@@ -186,38 +250,7 @@ func (c *Cluster) createPod(existingCluster []string, m *zookeeperutil.Member, s
 			k8sutil.AddZookeeperVolumeToPod(pod, nil)
 		}
 	*/
-	_, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Create(pod)
-	if err != nil {
-		return err
-	}
-	return nil
-	//podInformer, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Watch(metav1.ListOptions{
-	//	LabelSelector: "app=zookeeper,zookeeper_cluster=" + c.cluster.Name,
-	//	FieldSelector:"metadata.name=" + pod.Name,
-	//})
-	//if err != nil {
-	//	return err
-	//}
-	//defer func() {
-	//	podInformer.Stop()
-	//}()
-	//
-	//// TODO: Seperate this into another function
-	//for {
-	//	select {
-	//	case event := <-podInformer.ResultChan():
-	//		if event.Type == watch.Added || event.Type == watch.Modified {
-	//			pod := event.Object.DeepCopyObject().(*v1.Pod)
-	//			if pod.Status.Phase == v1.PodRunning {
-	//				return nil
-	//			}
-	//		} else if event.Type == watch.Deleted {
-	//			return fmt.Errorf("Pod %v is deleted!", pod.Name)
-	//		} else if event.Type == watch.Error {
-	//			return fmt.Errorf("Error %v happend when watching Pod %v",event.Object, pod.Name)
-	//		}
-	//	}
-	//}
+	return c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Create(pod)
 }
 
 func (c *Cluster) removePod(name string, wait bool) error {
@@ -236,10 +269,11 @@ func (c *Cluster) removePod(name string, wait bool) error {
 	return nil
 }
 
-func (c *Cluster) PollPods() (running, pending []*v1.Pod, err error) {
+func (c *Cluster) listPods() (pods []*v1.Pod, err error) {
 	podList, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).List(k8sutil.ClusterListOpt(c.cluster.Name))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to list running pods: %v", err)
+		ReconcileFailed.WithLabelValues("failed to list pods").Inc()
+		return nil, fmt.Errorf("failed to list pods for ZookeeperCluster %v:%v: %v", c.cluster.Namespace, c.cluster.Name, err)
 	}
 
 	for i := range podList.Items {
@@ -250,42 +284,66 @@ func (c *Cluster) PollPods() (running, pending []*v1.Pod, err error) {
 			continue
 		}
 		if len(pod.OwnerReferences) < 1 {
-			c.logger.Warningf("pollPods: ignore pod %v: no owner", pod.Name)
+			c.logger.Warningf("list pods: ignore pod %v: no owner", pod.Name)
 			continue
 		}
 		if pod.OwnerReferences[0].UID != c.cluster.UID {
-			c.logger.Warningf("pollPods: ignore pod %v: owner (%v) is not %v",
+			c.logger.Warningf("list pods: ignore pod %v: owner (%v) is not %v",
 				pod.Name, pod.OwnerReferences[0].UID, c.cluster.UID)
 			continue
 		}
-		if pod.Labels["app"] != "zookeeper" {
-			c.logger.Warningf("pollPods: ignore pod %v: label app (%v) is not \"zookeeper\"",
-				pod.Name, pod.Labels["app"])
-			continue
-		}
+		pods = append(pods, pod)
+	}
 
-		if pod.Labels["zookeeper_cluster"] != c.cluster.Name {
-			c.logger.Warningf("pollPods: ignore pod %v: label zookeeper_cluster (%v) is not %v",
-				pod.Name, pod.Labels["zookeeper_cluster"], c.cluster.Name)
-			continue
-		}
+	return pods, nil
+}
 
-		// TODO: release pods whose owner is c.cluster, but the label doesn't match.
+func (c *Cluster) getPodsSeparatedByStatus() (running, ready, unready, stopped []*v1.Pod, err error) {
+	pods, err := c.listPods()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	for _, pod := range pods {
 		switch pod.Status.Phase {
 		case v1.PodRunning:
-			running = append(running, pod)
+			if k8sutil.IsPodReady(pod) {
+				if _, ok := pod.Labels["waiting"]; ok {
+					ready = append(ready, pod)
+				} else {
+					running = append(running, pod)
+				}
+			} else {
+				unready = append(unready, pod)
+			}
 		case v1.PodPending:
-			pending = append(pending, pod)
+		case v1.PodUnknown:
+			unready = append(unready, pod)
+		default:
+			stopped = append(stopped, pod)
 		}
 	}
 
-	return running, pending, nil
+	return running, ready, unready, stopped, nil
 }
 
-func (c *Cluster) UpdateMemberStatus(running []*v1.Pod) {
+func (c *Cluster) getLivingPodsAndDeleteStoppedPods() (running, ready, unready []*v1.Pod, err error) {
+	running, ready, unready, stopped, err := c.getPodsSeparatedByStatus()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	for _, pod := range stopped {
+		err = c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Delete(pod.Name, nil)
+		c.logger.Warn("Fail to delete pod %v: %v", pod, err)
+	}
+
+	return running, ready, unready, nil
+}
+
+func (c *Cluster) UpdateMemberStatus() {
 	var unready []string
 	var ready []string
-	for _, pod := range running {
+	for _, pod := range c.runningPods {
 		if k8sutil.IsPodReady(pod) {
 			ready = append(ready, pod.Name)
 			continue

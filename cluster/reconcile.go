@@ -17,8 +17,6 @@ package cluster
 import (
 	"errors"
 	"fmt"
-	"reflect"
-
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/util/k8sutil"
 	"zookeeper-operator/util/zookeeperutil"
@@ -32,7 +30,7 @@ var ErrLostQuorum = errors.New("lost quorum")
 // Reconcile reconciles cluster current state to desired state specified by spec.
 // - it tries to Reconcile the cluster to desired size.
 // - if the cluster needs for upgrade, it tries to upgrade old member one by one.
-func (c *Cluster) Reconcile(pods []*v1.Pod) error {
+func (c *Cluster) Reconcile() error {
 	c.logger.Infoln("Start reconciling")
 	defer c.logger.Infoln("Finish reconciling")
 
@@ -41,25 +39,35 @@ func (c *Cluster) Reconcile(pods []*v1.Pod) error {
 	}()
 
 	sp := c.cluster.Spec
-	running := PodsToMemberSet(pods)
+	running := PodsToMemberSet(c.runningPods)
 	// Reconfigure required if running == membership but clusterConfig != membership
-	if !running.IsEqual(c.Members) {
+	if len(c.readyPods) > 0 {
 		clientHosts := c.Members.ClientHostList()
-		zkClusterConfig, err := zookeeperutil.GetClusterConfig(clientHosts)
+		newconfig := PodsToMemberSet(append(c.runningPods, c.readyPods...)).ClusterConfig()
+
+		c.logger.Infoln("Reconfiguring ZK cluster")
+		config, err := zookeeperutil.ReconfigureCluster(clientHosts, newconfig)
 		if err != nil {
+			c.logger.Infoln("Reconfigure error")
 			return err
 		}
-		runningClusterConfig := running.ClusterConfig()
-		if len(zkClusterConfig) != running.Size() || !reflect.DeepEqual(zkClusterConfig, runningClusterConfig) {
-			c.logger.Infoln("Reconfiguring ZK cluster")
-			config, err := zookeeperutil.ReconfigureCluster(clientHosts, runningClusterConfig)
+
+		new_ready := []*v1.Pod{}
+		for _, pod := range c.readyPods {
+			delete(pod.Labels, "waiting")
+			new_pod, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Update(pod)
 			if err != nil {
-				c.logger.Infoln("Reconfigure error")
-				return err
+				c.logger.Warn("Error happended when updating pod %v: %v", pod, err)
+				new_ready = append(new_ready, pod)
+			} else {
+				c.runningPods = append(c.runningPods, new_pod)
 			}
-			c.logger.Infoln(fmt.Sprintf("New ZK config: %s", config))
-			return nil
 		}
+		c.readyPods = new_ready
+		c.logger.Infoln(fmt.Sprintf("New ZK config: %s", config))
+
+		return nil
+
 	}
 	// If not enough are running or membership size != spec size then maybe resize
 	if !running.IsEqual(c.Members) || c.Members.Size() != sp.Size {
@@ -68,10 +76,10 @@ func (c *Cluster) Reconcile(pods []*v1.Pod) error {
 	c.cluster.Status.ClearCondition(api.ClusterConditionScaling)
 
 	// TODO: @MDF: Try and upgrade the leader last, that way we don't bounce it around repeatedly
-	if needUpgrade(pods, sp) {
+	if needUpgrade(c.runningPods, sp) {
 		c.cluster.Status.UpgradeVersionTo(sp.Version)
 
-		m := pickOneOldMember(pods, sp.Version)
+		m := pickOneOldMember(c.runningPods, sp.Version)
 		return c.upgradeOneMember(m.Name)
 	}
 	c.cluster.Status.ClearCondition(api.ClusterConditionUpgrading)
@@ -142,11 +150,15 @@ func (c *Cluster) addMember(toAdd *zookeeperutil.Member, state string) error {
 	existingCluster := c.Members.ClusterConfig()
 	c.Members.Add(toAdd)
 
-	if err := c.createPod(existingCluster, toAdd, state); err != nil {
+	pod, err := c.createPod(existingCluster, toAdd, state)
+	if err != nil {
 		return fmt.Errorf("fail to create member's pod (%s): %v", toAdd.Name, err)
 	}
+	if k8sutil.IsPodReady(pod) {
+		c.readyPods = append(c.readyPods, pod)
+	}
 	c.logger.Infof("added member (%s)", toAdd.Name)
-	_, err := c.eventsCli.Create(k8sutil.NewMemberAddEvent(toAdd.Name, c.cluster))
+	_, err = c.eventsCli.Create(k8sutil.NewMemberAddEvent(toAdd.Name, c.cluster))
 	if err != nil {
 		c.logger.Errorf("failed to create new member add event: %v", err)
 	}

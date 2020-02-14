@@ -23,7 +23,8 @@ import (
 	"k8s.io/api/core/v1"
 )
 
-func (c *Cluster) UpdateMembers(known zookeeperutil.MemberSet) error {
+func (c *Cluster) UpdateMembers() error {
+	known := PodsToMemberSet(c.runningPods)
 	resp, err := zookeeperutil.GetClusterConfig(known.ClientHostList())
 	if err != nil {
 		return err

@@ -108,82 +108,32 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 	sharedCluster, err := c.zkInformer.Lister().ZookeeperClusters(ns).Get(name)
 	sharedCluster = sharedCluster.DeepCopy()
 	zkCluster := cluster.New(c.makeClusterConfig(), sharedCluster)
+	start := time.Now()
+
 	if sharedCluster.Status.Phase == api.ClusterPhaseNone {
 		err = zkCluster.Create()
 		if err != nil {
 			return false, err
 		}
 	}
-
-	start := time.Now()
-	// TODO: we may got nothing here after creating pod
-	running, pending, err := zkCluster.PollPods()
-	// TODO: delete error pods
-
-	if running == nil && pending == nil {
-		// Don't start seed member in create. If we do that, and then delete the seed pod, we will
-		// never generate the seed member again.
-		err = zkCluster.StartSeedMember()
-		if err != nil {
-			return false, err
-		}
-		running, pending, err = zkCluster.PollPods()
-	}
-
-	if err != nil {
-		c.logger.Errorf("fail to poll pods: %v", err)
-		cluster.ReconcileFailed.WithLabelValues("failed to poll pods").Inc()
-		return false, err
-	}
-
-	if len(pending) > 0 {
-		// Pod startup might take long, e.g. pulling image. It would deterministically become running or succeeded/failed later.
-		c.logger.Infof("skip reconciliation: running (%v), pending (%v)", k8sutil.GetPodNames(running), k8sutil.GetPodNames(pending))
-		cluster.ReconcileFailed.WithLabelValues("not all pods are running").Inc()
-		return true, nil
-	}
-
-	//if len(running) == 0 {
-	// TODO: how to handle this case?
-	//	c.logger.Warningf("all zookeeper pods are dead.")
-	//	return false, nil
-	//}
-
-	// On controller restore, we could have "members == nil"
-	rerr := zkCluster.UpdateMembers(cluster.PodsToMemberSet(running))
-	if rerr != nil {
-		c.logger.Errorf("failed to update members: %v", rerr)
-		return false, rerr
-	}
-
-	rerr = zkCluster.Reconcile(running)
-	if rerr != nil {
-		c.logger.Errorf("failed to reconcile: %v", rerr)
-		return false, rerr
-	}
-	zkCluster.UpdateMemberStatus(running)
-	if err := zkCluster.UpdateCR(); err != nil {
-		c.logger.Warningf("periodic update CR status failed: %v", err)
-	}
+	rerr := zkCluster.Sync()
 
 	cluster.ReconcileHistogram.WithLabelValues(sharedCluster.Name).Observe(time.Since(start).Seconds())
 
 	if rerr != nil {
 		cluster.ReconcileFailed.WithLabelValues(rerr.Error()).Inc()
-	}
-
-	if cluster.IsFatalError(rerr) {
-		sharedCluster.Status.SetReason(rerr.Error())
-		c.logger.Errorf("cluster failed: %v", rerr)
-		zkCluster.ReportFailedStatus()
+		if cluster.IsFatalError(rerr) {
+			sharedCluster.Status.SetReason(rerr.Error())
+			c.logger.Errorf("cluster failed: %v", rerr)
+			zkCluster.ReportFailedStatus()
+		}
 		return false, rerr
 	}
 
-	if len(running) == sharedCluster.Spec.Size {
-		return true, nil
-	} else {
-		return false, nil
+	if !zkCluster.IsFinished() {
+		c.eventQueue.AddAfter(key, 20*time.Second)
 	}
+	return true, nil
 }
 
 func (c *Controller) makeClusterConfig() cluster.Config {

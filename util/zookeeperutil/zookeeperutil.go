@@ -25,6 +25,7 @@ import (
 	 * - if a server in the list of hosts is inaccessible it segfaults
 	 */
 	"github.com/blafrisch/go-zookeeper/zk"
+	"zookeeper-operator/util"
 )
 
 func GetClusterConfig(hosts []string) ([]string, error) {
@@ -58,6 +59,7 @@ func ReconfigureCluster(hosts []string, desiredConfig []string) ([]string, error
 		return nil, err
 	}
 
+	desiredConfig = util.RemoveDuplicateElement(desiredConfig)
 	// args are (joiningServers string, leavingServers string, newMembers string, fromConfig int64)
 	// only required params are the first two if doing an incremental change
 	//   or the third param if doing a non-incremental

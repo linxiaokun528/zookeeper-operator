@@ -241,6 +241,11 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 		"zookeeper_cluster": clusterName,
 	}
 
+	if state != "seed" {
+		// Indicate this pod is waiting to join the zookeeper cluster(need to reconfig in zkcluster).
+		labels["waiting"] = "true"
+	}
+
 	livenessProbe := newZookeeperProbe()
 	readinessProbe := newZookeeperProbe()
 	readinessProbe.InitialDelaySeconds = 1
@@ -373,8 +378,12 @@ func IsKubernetesResourceNotFoundError(err error) bool {
 // We are using internal api types for cluster related.
 func ClusterListOpt(clusterName string) metav1.ListOptions {
 	return metav1.ListOptions{
-		LabelSelector: labels.SelectorFromSet(LabelsForCluster(clusterName)).String(),
+		LabelSelector: ClusterSelector(clusterName).String(),
 	}
+}
+
+func ClusterSelector(clusterName string) labels.Selector {
+	return labels.SelectorFromSet(LabelsForCluster(clusterName))
 }
 
 func LabelsForCluster(clusterName string) map[string]string {
