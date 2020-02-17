@@ -16,20 +16,26 @@ package zookeeperutil
 
 import (
 	"fmt"
+	v1 "k8s.io/api/core/v1"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-type Member struct {
-	// Name is of the format "clusterName-ID"
-	Name string
-	// Kubernetes namespace this member runs in.
-	Namespace string
-}
+type Member v1.Pod
 
 func (m *Member) Addr() string {
-	return fmt.Sprintf("%s.%s.%s.svc", m.Name, clusterNameFromMemberName(m.Name), m.Namespace)
+	// If we use "<pod-name>.<service-name>" or "<pod-name>.<service-name>.<pod-namespace>.svc" as the pod domain,
+	// we may get 127.0.0.1 from this pod domain first, and after a while, we will get the real-ip(like 10.1.1.76) from
+	// this domain. So sometimes, zookeeper will listen on 127.0.0.1:2888 and 127.0.0.1:3888, which causes leader
+	// election to fail, because other pods won't be able to connect to the real-ip:2888 and real-ip:3888.
+	// It seems that if we use "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>"(cluster-domain is
+	// something like "cluster.local") as the pod domain, we will always get real-ip frim the pod domain.
+
+	// We need to figure out a way to get the cluster-domain, or make sure that we can get the real-ip from
+	// the pod-domain.
+	// TODO: the cluster-domain may not be "cluster.local". We need to consider this.
+	return fmt.Sprintf("%s.%s.%s.svc.cluster.local", m.Name, clusterNameFromMemberName(m.Name), m.Namespace)
 }
 
 func (m *Member) ID() int {
@@ -101,15 +107,20 @@ func (ms MemberSet) Remove(name string) {
 	delete(ms, name)
 }
 
-func (ms MemberSet) MaxMemberID() int {
-	maxID := 0
+func (ms MemberSet) NextMemberID() int {
+	missedID := 0
+	ids := map[int]struct{}{}
 	for _, m := range ms {
-		memberID := m.ID()
-		if memberID > maxID {
-			maxID = memberID
+		ids[m.ID()] = struct{}{}
+	}
+	for {
+		if _, ok := ids[missedID]; ok {
+			missedID++
+		} else {
+			break
 		}
 	}
-	return maxID
+	return missedID
 }
 
 func (ms MemberSet) ClientHostList() []string {
@@ -127,6 +138,12 @@ func (ms MemberSet) ClusterConfig() []string {
 	}
 	sort.Strings(clusterConfig)
 	return clusterConfig
+}
+
+func (ms MemberSet) Update(m MemberSet) {
+	for name, member := range m {
+		ms[name] = member
+	}
 }
 
 func clusterNameFromMemberName(mn string) string {

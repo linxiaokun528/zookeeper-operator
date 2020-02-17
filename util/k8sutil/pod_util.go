@@ -15,8 +15,8 @@
 package k8sutil
 
 import (
-	"encoding/json"
 	"fmt"
+	"zookeeper-operator/util/zookeeperutil"
 
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	//"zookeeper-operator/util/zookeeperutil"
@@ -92,9 +92,9 @@ fi`)
 				Command: []string{"/bin/sh", "-c", cmd},
 			},
 		},
-		InitialDelaySeconds: 10,
-		TimeoutSeconds:      10,
-		PeriodSeconds:       60,
+		InitialDelaySeconds: 100,
+		TimeoutSeconds:      100,
+		PeriodSeconds:       600,
 		FailureThreshold:    3,
 	}
 }
@@ -148,10 +148,22 @@ func getPodReadyCondition(status *v1.PodStatus) *v1.PodCondition {
 	return nil
 }
 
-func PodSpecToPrettyJSON(pod *v1.Pod) (string, error) {
-	bytes, err := json.MarshalIndent(pod.Spec, "", "    ")
-	if err != nil {
-		return "", err
+func GetPodsSeparatedByStatus(pods []*v1.Pod) (running, unready, stopped []*v1.Pod) {
+	for _, pod := range pods {
+		m := zookeeperutil.Member(*pod)
+		switch m.Status.Phase {
+		case v1.PodRunning:
+			if IsPodReady(pod) {
+				running = append(running, pod)
+			} else {
+				unready = append(unready, pod)
+			}
+		case v1.PodPending, v1.PodUnknown:
+			unready = append(unready, pod)
+		default:
+			stopped = append(stopped, pod)
+		}
 	}
-	return string(bytes), nil
+
+	return running, unready, stopped
 }

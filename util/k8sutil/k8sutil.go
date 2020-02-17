@@ -74,13 +74,9 @@ func SetZookeeperVersion(pod *v1.Pod, version string) {
 	pod.Annotations[zookeeperVersionAnnotationKey] = version
 }
 
-func GetPodNames(pods []*v1.Pod) []string {
-	if len(pods) == 0 {
-		return nil
-	}
-	res := []string{}
-	for _, p := range pods {
-		res = append(res, p.Name)
+func GetMemberNames(members zookeeperutil.MemberSet) (res []string) {
+	for name, _ := range members {
+		res = append(res, name)
 	}
 	return res
 }
@@ -241,22 +237,21 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 		"zookeeper_cluster": clusterName,
 	}
 
-	if state != "seed" {
-		// Indicate this pod is waiting to join the zookeeper cluster(need to reconfig in zkcluster).
-		labels["waiting"] = "true"
-	}
-
-	livenessProbe := newZookeeperProbe()
-	readinessProbe := newZookeeperProbe()
-	readinessProbe.InitialDelaySeconds = 1
-	readinessProbe.TimeoutSeconds = 5
-	readinessProbe.PeriodSeconds = 5
-	readinessProbe.FailureThreshold = 3
+	//livenessProbe := newZookeeperProbe()
+	//readinessProbe := newZookeeperProbe()
+	//readinessProbe.InitialDelaySeconds = 10
+	//readinessProbe.TimeoutSeconds = 50
+	//readinessProbe.PeriodSeconds = 50
+	//readinessProbe.FailureThreshold = 30
+	//
+	//container := containerWithProbes(
+	//	zookeeperContainer(cs.Repository, cs.Version),
+	//	livenessProbe,
+	//	readinessProbe)
 
 	container := containerWithProbes(
 		zookeeperContainer(cs.Repository, cs.Version),
-		livenessProbe,
-		readinessProbe)
+		nil, nil)
 
 	zooServers := make([]string, len(existingCluster)+1)
 	copy(zooServers, existingCluster)
@@ -307,11 +302,11 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 				Image: imageNameBusybox(cs.Pod),
 				Name:  "check-dns",
 				// We bind to [hostname].[clustername].[namespace].svc which may take some time to appear in kubedns
-				Command: []string{"/bin/sh", "-c", fmt.Sprintf(`
-					while ( ! nslookup %s )
-					do
-						sleep 2
-					done`, m.Addr())},
+				Command: []string{"/bin/sh", "-c", fmt.Sprintf(
+					`while ( ! nslookup %s )
+do
+sleep 2
+done`, m.Addr())},
 			}},
 			Containers:    []v1.Container{container},
 			RestartPolicy: v1.RestartPolicyNever,
@@ -329,7 +324,12 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 			},
 		},
 	}
+	// TODO: make this function "SetAnnotations"
 	SetZookeeperVersion(pod, cs.Version)
+	if state != "seed" {
+		// Indicate this pod is waiting to join the zookeeper cluster(need to reconfig in zkcluster).
+		pod.Annotations["waiting"] = "true"
+	}
 	applyPodPolicy(clusterName, pod, cs.Pod)
 	addOwnerRefToObject(pod.GetObjectMeta(), owner)
 	return pod

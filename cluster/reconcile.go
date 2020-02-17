@@ -17,6 +17,7 @@ package cluster
 import (
 	"errors"
 	"fmt"
+	"sync"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/util/k8sutil"
 	"zookeeper-operator/util/zookeeperutil"
@@ -35,104 +36,71 @@ func (c *Cluster) Reconcile() error {
 	defer c.logger.Infoln("Finish reconciling")
 
 	defer func() {
-		c.cluster.Status.Size = c.Members.Size()
+		c.cluster.Status.Size = c.runningMembers.Size()
 	}()
 
-	sp := c.cluster.Spec
-	running := PodsToMemberSet(c.runningPods)
 	// Reconfigure required if running == membership but clusterConfig != membership
-	if len(c.readyPods) > 0 {
-		clientHosts := c.Members.ClientHostList()
-		newconfig := PodsToMemberSet(append(c.runningPods, c.readyPods...)).ClusterConfig()
+	if c.readyMembers.Size() > 0 {
+		all := zookeeperutil.MemberSet{}
+		all.Update(c.runningMembers)
+		all.Update(c.readyMembers)
 
 		c.logger.Infoln("Reconfiguring ZK cluster")
-		config, err := zookeeperutil.ReconfigureCluster(clientHosts, newconfig)
+		config, err := zookeeperutil.ReconfigureCluster(c.runningMembers.ClientHostList(), all.ClusterConfig())
 		if err != nil {
 			c.logger.Infoln("Reconfigure error")
 			return err
 		}
 
-		new_ready := []*v1.Pod{}
-		for _, pod := range c.readyPods {
-			delete(pod.Labels, "waiting")
-			new_pod, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Update(pod)
-			if err != nil {
-				c.logger.Warn("Error happended when updating pod %v: %v", pod, err)
-				new_ready = append(new_ready, pod)
-			} else {
-				c.runningPods = append(c.runningPods, new_pod)
-			}
-		}
-		c.readyPods = new_ready
 		c.logger.Infoln(fmt.Sprintf("New ZK config: %s", config))
 
-		return nil
+		wait := sync.WaitGroup{}
+		nbPods := c.readyMembers.Size()
+		wait.Add(nbPods)
+		for _, member := range c.readyMembers {
+			go func() {
+				delete(member.Annotations, "waiting")
+				defer wait.Done()
+				pod, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Update((*v1.Pod)(member))
+				if err != nil {
+					c.logger.Warn("Error happended when updating pod %v: %v", member, err)
+				} else {
+					delete(c.readyMembers, member.Name)
+					c.runningMembers[member.Name] = (*zookeeperutil.Member)(pod)
+				}
+			}()
+		}
+		wait.Wait()
 
+		return nil
 	}
 	// If not enough are running or membership size != spec size then maybe resize
-	if !running.IsEqual(c.Members) || c.Members.Size() != sp.Size {
-		return c.reconcileMembers(running)
+	if c.runningMembers.Size() != c.cluster.Spec.Size {
+		return c.resize()
 	}
 	c.cluster.Status.ClearCondition(api.ClusterConditionScaling)
 
 	// TODO: @MDF: Try and upgrade the leader last, that way we don't bounce it around repeatedly
-	if needUpgrade(c.runningPods, sp) {
-		c.cluster.Status.UpgradeVersionTo(sp.Version)
+	if c.needUpgrade() {
+		c.cluster.Status.UpgradeVersionTo(c.cluster.Spec.Version)
 
-		m := pickOneOldMember(c.runningPods, sp.Version)
+		m := c.pickOneOldMember()
 		return c.upgradeOneMember(m.Name)
 	}
 	c.cluster.Status.ClearCondition(api.ClusterConditionUpgrading)
 
-	c.cluster.Status.SetVersion(sp.Version)
+	c.cluster.Status.SetVersion(c.cluster.Spec.Version)
 	c.cluster.Status.SetReadyCondition()
 
 	return nil
 }
 
-// reconcileMembers reconciles
-// - running pods on k8s and cluster membership
-// - cluster membership and expected size of zookeeper cluster
-// Steps:
-// 1. Remove all pods from running set that does not belong to member set.
-// 2. L consist of remaining pods of runnings
-// 3. If L = Members, the current state matches the membership state. END.
-// 4. If len(L) < len(Members)/2 + 1, return quorum lost error.
-// 5. Add one missing member. END.
-func (c *Cluster) reconcileMembers(running zookeeperutil.MemberSet) error {
-	c.logger.Infof("running Members: %s", running)
-	c.logger.Infof("cluster membership: %s", c.Members)
-
-	unknownMembers := running.Diff(c.Members)
-	//if unknownMembers.Size() > 0 {
-	//	c.logger.Infof("removing unexpected pods: %v", unknownMembers)
-	//	for _, m := range unknownMembers {
-	//		if err := c.removePod(m.Name, true); err != nil {
-	//			return err
-	//		}
-	//	}
-	//}
-	L := running.Diff(unknownMembers)
-
-	if L.Size() == c.Members.Size() {
-		return c.resize()
-	}
-
-	if L.Size() < c.Members.Size()/2+1 {
-		return ErrLostQuorum
-	}
-
-	c.logger.Infof("removing one dead member")
-	// remove dead Members that doesn't have any running pods before doing resizing.
-	return c.replaceDeadMember(c.Members.Diff(L).PickOne())
-}
-
 func (c *Cluster) resize() error {
-	if c.Members.Size() == c.cluster.Spec.Size {
+	if c.runningMembers.Size() == c.cluster.Spec.Size {
 		return nil
 	}
 
-	if c.Members.Size() < c.cluster.Spec.Size {
+	if c.runningMembers.Size() < c.cluster.Spec.Size {
 		// TODO: @MDF: Perhaps we want to add 2x at a time if we currently have an odd membership, we should be able to do that
 		return c.addOneMember()
 	}
@@ -141,21 +109,20 @@ func (c *Cluster) resize() error {
 }
 
 func (c *Cluster) addOneMember() error {
-	c.cluster.Status.SetScalingUpCondition(c.Members.Size(), c.cluster.Spec.Size)
-	newMember := c.newMember()
+	c.cluster.Status.SetScalingUpCondition(c.runningMembers.Size(), c.cluster.Spec.Size)
+	newMember := c.nextMember()
 	return c.addMember(newMember, "new")
 }
 
 func (c *Cluster) addMember(toAdd *zookeeperutil.Member, state string) error {
-	existingCluster := c.Members.ClusterConfig()
-	c.Members.Add(toAdd)
+	existingCluster := c.runningMembers.ClusterConfig()
 
 	pod, err := c.createPod(existingCluster, toAdd, state)
 	if err != nil {
 		return fmt.Errorf("fail to create member's pod (%s): %v", toAdd.Name, err)
 	}
 	if k8sutil.IsPodReady(pod) {
-		c.readyPods = append(c.readyPods, pod)
+		c.readyMembers[pod.Name] = (*zookeeperutil.Member)(pod)
 	}
 	c.logger.Infof("added member (%s)", toAdd.Name)
 	_, err = c.eventsCli.Create(k8sutil.NewMemberAddEvent(toAdd.Name, c.cluster))
@@ -166,10 +133,10 @@ func (c *Cluster) addMember(toAdd *zookeeperutil.Member, state string) error {
 }
 
 func (c *Cluster) removeOneMember() error {
-	c.cluster.Status.SetScalingDownCondition(c.Members.Size(), c.cluster.Spec.Size)
+	c.cluster.Status.SetScalingDownCondition(c.runningMembers.Size(), c.cluster.Spec.Size)
 
 	// TODO: @MDF: Be smarter, don't pick the leader
-	return c.removeMember(c.Members.PickOne(), true)
+	return c.removeMember(c.runningMembers.PickOne(), true)
 }
 
 func (c *Cluster) replaceDeadMember(toReplace *zookeeperutil.Member) error {
@@ -194,12 +161,9 @@ func (c *Cluster) removeMember(toRemove *zookeeperutil.Member, isScalingEvent bo
 		}
 	}()
 
-	// Remove the member from the MemberSet
-	c.Members.Remove(toRemove.Name)
-
 	if isScalingEvent {
 		// Perform a cluster reconfigure dropping the node to be removed
-		_, err = zookeeperutil.ReconfigureCluster(c.Members.ClientHostList(), c.Members.ClusterConfig())
+		_, err = zookeeperutil.ReconfigureCluster(c.runningMembers.ClientHostList(), c.runningMembers.ClusterConfig())
 		if err != nil {
 			c.logger.Errorf("failed to reconfigure remove member from cluster: %v", err)
 		}
@@ -222,6 +186,8 @@ func (c *Cluster) removeMember(toRemove *zookeeperutil.Member, isScalingEvent bo
 			}
 		}
 	*/
+
+	c.runningMembers.Remove(toRemove.Name)
 	c.logger.Infof("removed member (%v) with ID (%d)", toRemove.Name, toRemove.ID)
 	return nil
 }
@@ -234,16 +200,16 @@ func (c *Cluster) removePVC(pvcName string) error {
 	return nil
 }
 
-func needUpgrade(pods []*v1.Pod, cs api.ClusterSpec) bool {
-	return len(pods) == cs.Size && pickOneOldMember(pods, cs.Version) != nil
+func (c *Cluster) needUpgrade() bool {
+	return c.runningMembers.Size() == c.cluster.Spec.Size && c.pickOneOldMember() != nil
 }
 
-func pickOneOldMember(pods []*v1.Pod, newVersion string) *zookeeperutil.Member {
-	for _, pod := range pods {
-		if k8sutil.GetZookeeperVersion(pod) == newVersion {
+func (c *Cluster) pickOneOldMember() *zookeeperutil.Member {
+	for _, member := range c.runningMembers {
+		if k8sutil.GetZookeeperVersion((*v1.Pod)(member)) == c.cluster.Spec.Version {
 			continue
 		}
-		return &zookeeperutil.Member{Name: pod.Name, Namespace: pod.Namespace}
+		return member
 	}
 	return nil
 }

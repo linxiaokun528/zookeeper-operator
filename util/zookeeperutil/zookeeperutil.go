@@ -25,7 +25,6 @@ import (
 	 * - if a server in the list of hosts is inaccessible it segfaults
 	 */
 	"github.com/blafrisch/go-zookeeper/zk"
-	"zookeeper-operator/util"
 )
 
 func GetClusterConfig(hosts []string) ([]string, error) {
@@ -59,14 +58,20 @@ func ReconfigureCluster(hosts []string, desiredConfig []string) ([]string, error
 		return nil, err
 	}
 
-	desiredConfig = util.RemoveDuplicateElement(desiredConfig)
-	// args are (joiningServers string, leavingServers string, newMembers string, fromConfig int64)
-	// only required params are the first two if doing an incremental change
-	//   or the third param if doing a non-incremental
+	//args are (joiningServers string, leavingServers string, newMembers string, fromConfig int64)
+	//only required params are the first two if doing an incremental change
+	//  or the third param if doing a non-incremental
 	newMembers := strings.Join(desiredConfig, ",")
 	data, _, err := conn.Reconfig("", "", newMembers, -1)
+	//data, _, err := conn.Get("/zookeeper/config")
+	//glog.Info(string(data))
+
+	//_, err = conn.Reconfig( desiredConfig, -1)
 	if err != nil {
-		glog.Error("Failed to push reconfig: ", newMembers)
+		// TODO: use the same logger in all the operator
+		glog.Error("Failed to push reconfig", hosts, desiredConfig)
+		//data, _, err := conn.Get("/zookeeper/config")
+		//glog.Info(string(data))
 		return nil, err
 	}
 
@@ -78,4 +83,6 @@ func ReconfigureCluster(hosts []string, desiredConfig []string) ([]string, error
 	sort.Strings(clusterConfig)
 
 	return clusterConfig, nil
+
+	//return []string{""},nil
 }

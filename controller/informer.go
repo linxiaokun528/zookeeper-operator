@@ -95,7 +95,6 @@ func (c *Controller) onAddZookeeperClus(obj interface{}) {
 }
 
 func (c *Controller) onUpdateZookeeperClus(oldObj, newObj interface{}) {
-	c.logger.Info("test")
 	c.addToQueue(newObj)
 }
 
