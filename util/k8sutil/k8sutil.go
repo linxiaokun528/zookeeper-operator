@@ -64,8 +64,6 @@ const (
 	AnnotationClusterWide = "clusterwide"
 )
 
-const TolerateUnreadyEndpointsAnnotation = "service.alpha.kubernetes.io/tolerate-unready-endpoints"
-
 func GetZookeeperVersion(pod *v1.Pod) string {
 	return pod.Annotations[zookeeperVersionAnnotationKey]
 }
@@ -184,29 +182,16 @@ func CreateAndWaitPod(kubecli kubernetes.Interface, ns string, pod *v1.Pod, time
 
 func newZookeeperServiceManifest(svcName, clusterName, clusterIP string, ports []v1.ServicePort) *v1.Service {
 	labels := LabelsForCluster(clusterName)
-	//TODO: Delete this in the final code
-	//if clusterIP == "None" {
-	//	clusterIP = ""
-	//	for i, _ := range ports {
-	//		ports[i].NodePort = ports[i].Port
-	//	}
-	//}
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   svcName,
 			Labels: labels,
-			Annotations: map[string]string{
-				TolerateUnreadyEndpointsAnnotation: "true",
-			},
 		},
 		Spec: v1.ServiceSpec{
-			//TODO: Delete this in the final code
-			//ExternalTrafficPolicy: "Local",
-			Ports:     ports,
-			Selector:  labels,
-			ClusterIP: clusterIP,
-			//TODO: Delete this in the final code
-			//Type: "NodePort",
+			Ports:                    ports,
+			Selector:                 labels,
+			ClusterIP:                clusterIP,
+			PublishNotReadyAddresses: true,
 		},
 	}
 
@@ -237,21 +222,17 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 		"zookeeper_cluster": clusterName,
 	}
 
-	//livenessProbe := newZookeeperProbe()
-	//readinessProbe := newZookeeperProbe()
-	//readinessProbe.InitialDelaySeconds = 10
-	//readinessProbe.TimeoutSeconds = 50
-	//readinessProbe.PeriodSeconds = 50
-	//readinessProbe.FailureThreshold = 30
-	//
-	//container := containerWithProbes(
-	//	zookeeperContainer(cs.Repository, cs.Version),
-	//	livenessProbe,
-	//	readinessProbe)
+	livenessProbe := newZookeeperProbe()
+	readinessProbe := newZookeeperProbe()
+	readinessProbe.InitialDelaySeconds = 10
+	readinessProbe.TimeoutSeconds = 50
+	readinessProbe.PeriodSeconds = 50
+	readinessProbe.FailureThreshold = 30
 
 	container := containerWithProbes(
 		zookeeperContainer(cs.Repository, cs.Version),
-		nil, nil)
+		livenessProbe,
+		readinessProbe)
 
 	zooServers := make([]string, len(existingCluster)+1)
 	copy(zooServers, existingCluster)
@@ -299,6 +280,7 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 				// busybox:latest uses uclibc which contains a bug that sometimes prevents name resolution
 				// More info: https://github.com/docker-library/busybox/issues/27
 				//Image default: "busybox:1.28.0-glibc",
+				// TODO: use the same image as the main container
 				Image: imageNameBusybox(cs.Pod),
 				Name:  "check-dns",
 				// We bind to [hostname].[clustername].[namespace].svc which may take some time to appear in kubedns

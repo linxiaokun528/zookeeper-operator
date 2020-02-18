@@ -131,7 +131,7 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 	}
 
 	if !zkCluster.IsFinished() {
-		c.eventQueue.AddAfter(key, 20*time.Second)
+		c.eventQueue.AddAfter(key, 30*time.Second)
 	}
 	return true, nil
 }

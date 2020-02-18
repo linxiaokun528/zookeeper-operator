@@ -187,10 +187,10 @@ func (c *Cluster) StartSeedMember() error {
 	m := c.nextMember()
 	// TODO: @MDF: this fails if someone deletes/recreates a cluster too fast
 	pod, err := c.createPod(make([]string, 0), m, "seed")
-	member := (*zookeeperutil.Member)(pod)
 	if err != nil {
 		return fmt.Errorf("failed to create seed member (%s): %v", m.Name, err)
 	}
+	member := (*zookeeperutil.Member)(pod)
 	// Almost impossible, but ...
 	if k8sutil.IsPodReady(pod) {
 		c.runningMembers[member.Name] = member

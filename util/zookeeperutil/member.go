@@ -26,14 +26,15 @@ type Member v1.Pod
 
 func (m *Member) Addr() string {
 	// If we use "<pod-name>.<service-name>" or "<pod-name>.<service-name>.<pod-namespace>.svc" as the pod domain,
-	// we may get 127.0.0.1 from this pod domain first, and after a while, we will get the real-ip(like 10.1.1.76) from
-	// this domain. So sometimes, zookeeper will listen on 127.0.0.1:2888 and 127.0.0.1:3888, which causes leader
-	// election to fail, because other pods won't be able to connect to the real-ip:2888 and real-ip:3888.
+	// we may get an error like
+	// "can't resolve 'example-zookeeper-cluster-1.example-zookeeper-cluster': Name does not resolve" from this pod
+	// domain first. Even we can successfully resolve the pod domain one time, we may get the same
+	// "Name does not resolve" error the next time. So even if we have init container to make sure the pod domain
+	// apprears in kubedns, we can still get errors.
 	// It seems that if we use "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>"(cluster-domain is
-	// something like "cluster.local") as the pod domain, we will always get real-ip frim the pod domain.
+	// something like "cluster.local") as the pod domain, we will always resolve the pod domain.
 
-	// We need to figure out a way to get the cluster-domain, or make sure that we can get the real-ip from
-	// the pod-domain.
+	// We need to figure out a way to get the cluster-domain.
 	// TODO: the cluster-domain may not be "cluster.local". We need to consider this.
 	return fmt.Sprintf("%s.%s.%s.svc.cluster.local", m.Name, clusterNameFromMemberName(m.Name), m.Namespace)
 }

@@ -109,6 +109,13 @@ func (c *Controller) onDeleteZookeeperClus(obj interface{}) {
 		if !ok {
 			panic(fmt.Sprintf("Tombstone contained object that is not an ZookeeperCluster: %#v", obj))
 		}
+
+		key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
+		if err != nil {
+			c.logger.Warningf("Couldn't get key for object %+v: %v", obj, err)
+			return
+		}
+		c.eventQueue.Forget(key)
 	}
 	// Don't need to do anything. If users want to delete the zk cluster, they can specify "--cascade=true"
 	// c.addToQueue(clus)

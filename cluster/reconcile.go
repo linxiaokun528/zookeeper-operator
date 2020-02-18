@@ -46,7 +46,7 @@ func (c *Cluster) Reconcile() error {
 		all.Update(c.readyMembers)
 
 		c.logger.Infoln("Reconfiguring ZK cluster")
-		config, err := zookeeperutil.ReconfigureCluster(c.runningMembers.ClientHostList(), all.ClusterConfig())
+		config, err := zookeeperutil.ReconfigureCluster(all.ClientHostList(), all.ClusterConfig())
 		if err != nil {
 			c.logger.Infoln("Reconfigure error")
 			return err
