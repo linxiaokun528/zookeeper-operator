@@ -15,7 +15,6 @@
 package k8sutil
 
 import (
-	"fmt"
 	"zookeeper-operator/util/zookeeperutil"
 
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
@@ -80,12 +79,12 @@ func containerWithRequirements(c v1.Container, r v1.ResourceRequirements) v1.Con
 }
 
 func newZookeeperProbe() *v1.Probe {
-	cmd := fmt.Sprintf(`OK=$(echo ruok | nc $(hostname) 2181)
+	cmd := `OK=$(echo ruok | nc localhost 2181)
 if [ "$OK" == "imok" ]; then
         exit 0
 else
         exit 1
-fi`)
+fi`
 	return &v1.Probe{
 		Handler: v1.Handler{
 			Exec: &v1.ExecAction{

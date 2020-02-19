@@ -31,11 +31,13 @@ func (m *Member) Addr() string {
 	// domain first. Even we can successfully resolve the pod domain one time, we may get the same
 	// "Name does not resolve" error the next time. So even if we have init container to make sure the pod domain
 	// apprears in kubedns, we can still get errors.
-	// It seems that if we use "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>"(cluster-domain is
-	// something like "cluster.local") as the pod domain, we will always resolve the pod domain.
+	// But if we use "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>"(cluster-domain is
+	// something like "cluster.local") as the pod domain, we will always resolve the pod domain. Because
+	// "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>" is specified in file "/etc/hosts" of the pod.
 
-	// We need to figure out a way to get the cluster-domain.
-	// TODO: the cluster-domain may not be "cluster.local". We need to consider this.
+	// TODO: for the sake of debug, we set the value to the full form
+	// "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>". But this will result in the failure to detect
+	// if the domain/endpoint is ready. We need to change this to "<pod-name>.<service-name>" in the final release.
 	return fmt.Sprintf("%s.%s.%s.svc.cluster.local", m.Name, clusterNameFromMemberName(m.Name), m.Namespace)
 }
 

@@ -224,10 +224,10 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 
 	livenessProbe := newZookeeperProbe()
 	readinessProbe := newZookeeperProbe()
-	readinessProbe.InitialDelaySeconds = 10
-	readinessProbe.TimeoutSeconds = 50
-	readinessProbe.PeriodSeconds = 50
-	readinessProbe.FailureThreshold = 30
+	readinessProbe.InitialDelaySeconds = 1
+	readinessProbe.TimeoutSeconds = 5
+	readinessProbe.PeriodSeconds = 5
+	readinessProbe.FailureThreshold = 3
 
 	container := containerWithProbes(
 		zookeeperContainer(cs.Repository, cs.Version),
