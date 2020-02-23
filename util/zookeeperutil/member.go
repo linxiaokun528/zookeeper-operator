@@ -96,10 +96,17 @@ func (ms MemberSet) String() string {
 }
 
 func (ms MemberSet) PickOne() *Member {
+	var last *Member = nil
 	for _, m := range ms {
-		return m
+		if last == nil {
+			last = m
+		} else {
+			if last.ID() < m.ID() {
+				last = m
+			}
+		}
 	}
-	panic("empty")
+	return last
 }
 
 func (ms MemberSet) Add(m *Member) {

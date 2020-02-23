@@ -59,8 +59,8 @@ func (c *Cluster) Reconcile() error {
 		wait.Add(nbPods)
 		for _, member := range c.readyMembers {
 			go func() {
-				delete(member.Annotations, "waiting")
 				defer wait.Done()
+				delete(member.Annotations, "waiting")
 				pod, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Update((*v1.Pod)(member))
 				if err != nil {
 					c.logger.Warn("Error happended when updating pod %v: %v", member, err)

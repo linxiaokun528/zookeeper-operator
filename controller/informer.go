@@ -51,7 +51,7 @@ func (c *Controller) run() {
 	defer utilruntime.HandleCrash()
 	defer c.eventQueue.ShutDown()
 
-	sharedInformerFactory := zkInformers.NewSharedInformerFactory(c.Config.ZookeeperCRCli, time.Second*300)
+	sharedInformerFactory := zkInformers.NewSharedInformerFactory(c.Config.ZookeeperCRCli, time.Minute*2)
 	go sharedInformerFactory.Start(c.ctx.Done())
 
 	c.zkInformer = sharedInformerFactory.Zookeeper().V1alpha1().ZookeeperClusters()
