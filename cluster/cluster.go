@@ -21,6 +21,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
@@ -116,6 +117,7 @@ func (c *Cluster) Create() error {
 }
 
 func (c *Cluster) Sync() error {
+	original_cluster := c.cluster.DeepCopy()
 	running, ready, unready, err := c.getLivingPodsAndDeleteStoppedPods()
 	if err != nil {
 		return nil
@@ -149,8 +151,19 @@ func (c *Cluster) Sync() error {
 		return rerr
 	}
 	c.UpdateMemberStatus()
+
+	if reflect.DeepEqual(original_cluster, c.cluster) {
+		return nil
+	}
+
+	// TODO: move the following to defer. We should update the CR every time something changes
+	data, err := k8sutil.CreatePatch(original_cluster, c.cluster, api.ZookeeperCluster{})
+	if err == nil {
+		c.logger.Info(string(data))
+	}
+
 	if err := c.UpdateCR(); err != nil {
-		c.logger.Warningf("periodic update CR status failed: %v", err)
+		c.logger.Warningf("	Update CR status failed: %v", err)
 	}
 	return nil
 }
@@ -329,12 +342,15 @@ func (c *Cluster) UpdateMemberStatus() {
 		}
 		unready = append(unready, member.Name)
 	}
-
+	// If we don't sort here, the different order of ready/unready may cause a update on CR.
+	sort.Strings(ready)
+	sort.Strings(unready)
 	c.cluster.Status.Members.Ready = ready
 	c.cluster.Status.Members.Unready = unready
 }
 
 func (c *Cluster) UpdateCR() error {
+	c.logger.Info("Updating CR")
 	newCluster, err := c.config.ZookeeperCRCli.ZookeeperV1alpha1().ZookeeperClusters(c.cluster.Namespace).Update(c.cluster)
 	if err != nil {
 		return fmt.Errorf("failed to update CR: %v", err)

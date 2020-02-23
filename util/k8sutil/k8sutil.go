@@ -56,7 +56,7 @@ const (
 
 	defaultBusyboxImage = "busybox:1.28.0-glibc"
 
-	defaultKubeAPIRequestTimeout = 30 * time.Second
+	defaultKubeAPIRequestTimeout = 5 * time.Minute
 
 	// AnnotationScope annotation name for defining instance scope. Used for specifing cluster wide clusters.
 	AnnotationScope = "zookeeper.database.apache.com/scope"

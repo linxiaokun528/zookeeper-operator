@@ -46,13 +46,11 @@ func (c *Cluster) Reconcile() error {
 		all.Update(c.readyMembers)
 
 		c.logger.Infoln("Reconfiguring ZK cluster")
-		config, err := zookeeperutil.ReconfigureCluster(all.ClientHostList(), all.ClusterConfig())
+		err := zookeeperutil.ReconfigureCluster(all.ClientHostList(), all.ClusterConfig())
 		if err != nil {
 			c.logger.Infoln("Reconfigure error")
 			return err
 		}
-
-		c.logger.Infoln(fmt.Sprintf("New ZK config: %s", config))
 
 		wait := sync.WaitGroup{}
 		nbPods := c.readyMembers.Size()
@@ -163,7 +161,7 @@ func (c *Cluster) removeMember(toRemove *zookeeperutil.Member, isScalingEvent bo
 
 	if isScalingEvent {
 		// Perform a cluster reconfigure dropping the node to be removed
-		_, err = zookeeperutil.ReconfigureCluster(c.runningMembers.ClientHostList(), c.runningMembers.ClusterConfig())
+		err = zookeeperutil.ReconfigureCluster(c.runningMembers.ClientHostList(), c.runningMembers.ClusterConfig())
 		if err != nil {
 			c.logger.Errorf("failed to reconfigure remove member from cluster: %v", err)
 		}

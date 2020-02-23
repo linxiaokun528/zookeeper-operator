@@ -90,7 +90,7 @@ func (c *Controller) processNextWorkItem() bool {
 		return true
 	}
 
-	utilruntime.HandleError(fmt.Errorf("Error syncing job: %v", err))
+	utilruntime.HandleError(fmt.Errorf("Error syncing zookeeper cluster: %v", err))
 	c.eventQueue.AddRateLimited(key)
 
 	return true
@@ -106,6 +106,10 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 		return false, fmt.Errorf("invalid zookeeper cluster key %q: either namespace or name is missing", key)
 	}
 	sharedCluster, err := c.zkInformer.Lister().ZookeeperClusters(ns).Get(name)
+	if sharedCluster.DeletionTimestamp != nil {
+		return true, nil
+	}
+
 	sharedCluster = sharedCluster.DeepCopy()
 	zkCluster := cluster.New(c.makeClusterConfig(), sharedCluster)
 	start := time.Now()

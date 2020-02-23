@@ -20,11 +20,9 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	/* TODO: @MDF: The ZK client has multiple issues which need addressing:
-	 * - it identifies as an old client version which causes WARNs in ZK itself
-	 * - if a server in the list of hosts is inaccessible it segfaults
+	/* TODO: The error message of this ZK client is too simple. Maybe change a zk client in the future.
 	 */
-	"github.com/blafrisch/go-zookeeper/zk"
+	"github.com/samuel/go-zookeeper/zk"
 )
 
 func GetClusterConfig(hosts []string) ([]string, error) {
@@ -50,39 +48,23 @@ func GetClusterConfig(hosts []string) ([]string, error) {
 	return clusterConfig, nil
 }
 
-func ReconfigureCluster(hosts []string, desiredConfig []string) ([]string, error) {
+func ReconfigureCluster(hosts []string, desiredConfig []string) error {
 	conn, _, err := zk.Connect(hosts, time.Second)
 	defer conn.Close()
 	if err != nil {
 		glog.Error("Failed to connect to ZK hosts: ", hosts)
-		return nil, err
+		return err
 	}
+	glog.Info("Pushing reconfig to zookeeper", desiredConfig)
+	_, err = conn.Reconfig(desiredConfig, -1)
 
-	//args are (joiningServers string, leavingServers string, newMembers string, fromConfig int64)
-	//only required params are the first two if doing an incremental change
-	//  or the third param if doing a non-incremental
-	newMembers := strings.Join(desiredConfig, ",")
-	data, _, err := conn.Reconfig("", "", newMembers, -1)
-	//data, _, err := conn.Get("/zookeeper/config")
-	//glog.Info(string(data))
-
-	//_, err = conn.Reconfig( desiredConfig, -1)
 	if err != nil {
 		// TODO: use the same logger in all the operator
 		glog.Error("Failed to push reconfig", hosts, desiredConfig)
-		//data, _, err := conn.Get("/zookeeper/config")
-		//glog.Info(string(data))
-		return nil, err
+		return err
 	}
 
-	// data is a []byte, we must convert it to a string
-	dataStr := string(data)
-	// the config data has servers first, last line is the version
-	configDataArr := strings.Split(dataStr, "\n")
-	clusterConfig := configDataArr[:len(configDataArr)-1]
-	sort.Strings(clusterConfig)
-
-	return clusterConfig, nil
+	return nil
 
 	//return []string{""},nil
 }

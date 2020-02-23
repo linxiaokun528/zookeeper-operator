@@ -3,7 +3,6 @@ module zookeeper-operator
 go 1.13
 
 require (
-	github.com/blafrisch/go-zookeeper v0.0.0-20180321141139-9c967b14e8f4
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.3.0
