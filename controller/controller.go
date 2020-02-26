@@ -112,6 +112,12 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 
 	sharedCluster = sharedCluster.DeepCopy()
 	zkCluster := cluster.New(c.makeClusterConfig(), sharedCluster)
+	defer func() {
+		if !zkCluster.IsFinished() {
+			c.eventQueue.AddAfter(key, 30*time.Second)
+		}
+	}()
+
 	start := time.Now()
 
 	if sharedCluster.Status.Phase == api.ClusterPhaseNone {
@@ -134,9 +140,6 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 		return false, rerr
 	}
 
-	if !zkCluster.IsFinished() {
-		c.eventQueue.AddAfter(key, 30*time.Second)
-	}
 	return true, nil
 }
 

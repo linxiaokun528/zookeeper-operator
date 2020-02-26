@@ -38,13 +38,21 @@ func (m *Member) Addr() string {
 	// TODO: for the sake of debug, we set the value to the full form
 	// "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>". But this will result in the failure to detect
 	// if the domain/endpoint is ready. We need to change this to "<pod-name>.<service-name>" in the final release.
-	return fmt.Sprintf("%s.%s.%s.svc.cluster.local", m.Name, clusterNameFromMemberName(m.Name), m.Namespace)
+	return fmt.Sprintf("%s.%s.%s.svc.cluster.local", m.Name, m.ClusterName(), m.Namespace)
 }
 
 func (m *Member) ID() int {
 	sSplit := strings.Split(m.Name, "-")
 	ID, _ := strconv.Atoi(sSplit[len(sSplit)-1])
 	return ID
+}
+
+func (m *Member) ClusterName() string {
+	i := strings.LastIndex(m.Name, "-")
+	if i == -1 {
+		panic(fmt.Sprintf("unexpected member name: %s", m.Name))
+	}
+	return m.Name[:i]
 }
 
 type MemberSet map[string]*Member
@@ -68,34 +76,11 @@ func (ms MemberSet) Diff(other MemberSet) MemberSet {
 	return diff
 }
 
-// IsEqual tells whether two member sets are equal by checking
-// - they have the same set of members and member equality are judged by Name only.
-func (ms MemberSet) IsEqual(other MemberSet) bool {
-	if ms.Size() != other.Size() {
-		return false
-	}
-	for n := range ms {
-		if _, ok := other[n]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
 func (ms MemberSet) Size() int {
 	return len(ms)
 }
 
-func (ms MemberSet) String() string {
-	var mstring []string
-
-	for m := range ms {
-		mstring = append(mstring, m)
-	}
-	return strings.Join(mstring, ",")
-}
-
-func (ms MemberSet) PickOne() *Member {
+func (ms MemberSet) PickOneToRemove() *Member {
 	var last *Member = nil
 	for _, m := range ms {
 		if last == nil {
@@ -142,6 +127,7 @@ func (ms MemberSet) ClientHostList() []string {
 }
 
 func (ms MemberSet) ClusterConfig() []string {
+	// TODO: make clusterconfig a struct
 	clusterConfig := make([]string, 0)
 	for _, m := range ms {
 		clusterConfig = append(clusterConfig, fmt.Sprintf("server.%d=%s:2888:3888:participant;0.0.0.0:2181", m.ID(), m.Addr()))
@@ -154,12 +140,4 @@ func (ms MemberSet) Update(m MemberSet) {
 	for name, member := range m {
 		ms[name] = member
 	}
-}
-
-func clusterNameFromMemberName(mn string) string {
-	i := strings.LastIndex(mn, "-")
-	if i == -1 {
-		panic(fmt.Sprintf("unexpected member name: %s", mn))
-	}
-	return mn[:i]
 }

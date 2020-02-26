@@ -15,8 +15,6 @@
 package k8sutil
 
 import (
-	"zookeeper-operator/util/zookeeperutil"
-
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	//"zookeeper-operator/util/zookeeperutil"
 
@@ -149,8 +147,7 @@ func getPodReadyCondition(status *v1.PodStatus) *v1.PodCondition {
 
 func GetPodsSeparatedByStatus(pods []*v1.Pod) (running, unready, stopped []*v1.Pod) {
 	for _, pod := range pods {
-		m := zookeeperutil.Member(*pod)
-		switch m.Status.Phase {
+		switch pod.Status.Phase {
 		case v1.PodRunning:
 			if IsPodReady(pod) {
 				running = append(running, pod)

@@ -215,11 +215,11 @@ func addOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 	o.SetOwnerReferences(append(o.GetOwnerReferences(), r))
 }
 
-func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterName, state string, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
+func NewZookeeperPod(m *zookeeperutil.Member, cluster zookeeperutil.MemberSet, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
 	labels := map[string]string{
 		"app":               "zookeeper",
 		"zookeeper_node":    m.Name,
-		"zookeeper_cluster": clusterName,
+		"zookeeper_cluster": m.ClusterName(),
 	}
 
 	livenessProbe := newZookeeperProbe()
@@ -234,20 +234,12 @@ func NewZookeeperPod(m *zookeeperutil.Member, existingCluster []string, clusterN
 		livenessProbe,
 		readinessProbe)
 
-	zooServers := make([]string, len(existingCluster)+1)
-	copy(zooServers, existingCluster)
-	if state == "seed" || state == "replacement" {
-		zooServers[len(existingCluster)] = fmt.Sprintf("server.%d=%s:2888:3888:participant;0.0.0.0:2181", m.ID(), m.Addr())
-	} else {
-		zooServers[len(existingCluster)] = fmt.Sprintf("server.%d=%s:2888:3888:observer;0.0.0.0:2181", m.ID(), m.Addr())
-	}
-
 	container.Env = append(container.Env, v1.EnvVar{
 		Name:  "ZOO_MY_ID",
 		Value: strconv.Itoa(m.ID()),
 	}, v1.EnvVar{
 		Name:  "ZOO_SERVERS",
-		Value: strings.Join(zooServers, " "),
+		Value: strings.Join(cluster.ClusterConfig(), " "),
 	}, v1.EnvVar{
 		Name:  "ZOO_MAX_CLIENT_CNXNS",
 		Value: "0", // default 60
@@ -297,7 +289,7 @@ done`, m.Addr())},
 			// For example, zookeeper-795649v9kq in default namespace will have DNS name
 			// `zookeeper-795649v9kq.zookeeper.default.svc`.
 			Hostname:                     m.Name,
-			Subdomain:                    clusterName,
+			Subdomain:                    m.ClusterName(),
 			AutomountServiceAccountToken: func(b bool) *bool { return &b }(false),
 			SecurityContext: &v1.PodSecurityContext{
 				RunAsUser:    &podUID,
@@ -308,11 +300,7 @@ done`, m.Addr())},
 	}
 	// TODO: make this function "SetAnnotations"
 	SetZookeeperVersion(pod, cs.Version)
-	if state != "seed" {
-		// Indicate this pod is waiting to join the zookeeper cluster(need to reconfig in zkcluster).
-		pod.Annotations["waiting"] = "true"
-	}
-	applyPodPolicy(clusterName, pod, cs.Pod)
+	applyPodPolicy(m.ClusterName(), pod, cs.Pod)
 	addOwnerRefToObject(pod.GetObjectMeta(), owner)
 	return pod
 }

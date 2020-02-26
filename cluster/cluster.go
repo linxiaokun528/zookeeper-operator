@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/generated/clientset/versioned"
@@ -69,10 +70,6 @@ type Cluster struct {
 
 	// Pods running as zookeeper members
 	runningMembers zookeeperutil.MemberSet
-
-	// Pods are running and ready to be zookeeper members.
-	// Need to reconfigure zookeeper cluster to make these members become zookeeper members.
-	readyMembers zookeeperutil.MemberSet
 }
 
 func New(config Config, cl *api.ZookeeperCluster) *Cluster {
@@ -118,32 +115,31 @@ func (c *Cluster) Create() error {
 
 func (c *Cluster) Sync() error {
 	original_cluster := c.cluster.DeepCopy()
-	running, ready, unready, err := c.getLivingPodsAndDeleteStoppedPods()
+	running, unready, stopped, err := c.getMembersSeparatedByStatus()
 	if err != nil {
-		return nil
+		return err
 	}
 
 	c.runningMembers = running
-	c.readyMembers = ready
-	if c.runningMembers.Size() == 0 && unready.Size() == 0 {
+	if c.runningMembers.Size() == 0 && unready.Size() == 0 && stopped.Size() == 0 {
 		// Don't start seed member in create. If we do that, and then delete the seed pod, we will
 		// never generate the seed member again.
-		err = c.StartSeedMember()
-		if err != nil {
-			return err
-		}
+		return c.scaleUp()
 	}
 
 	if unready.Size() > 0 {
 		// Pod startup might take long, e.g. pulling image. It would deterministically become ready or succeeded/failed later.
-		c.logger.Infof("skip reconciliation: ready (%v), unready (%v)", k8sutil.GetMemberNames(ready), k8sutil.GetMemberNames(unready))
+		c.logger.Infof("skip reconciliation: running (%v), unready (%v)", k8sutil.GetMemberNames(running), k8sutil.GetMemberNames(unready))
 		ReconcileFailed.WithLabelValues("not all pods are ready").Inc()
 		return nil
 	}
 
-	if c.runningMembers.Size() == 0 {
-		return nil
+	if stopped.Size() > 0 {
+		c.ReplaceStoppedMembers(stopped)
+		return fmt.Errorf("Some members are stopped: (%v)", k8sutil.GetMemberNames(stopped))
 	}
+
+	c.runningMembers = running
 
 	rerr := c.Reconcile()
 	if rerr != nil {
@@ -168,6 +164,44 @@ func (c *Cluster) Sync() error {
 	return nil
 }
 
+func (c *Cluster) ReplaceStoppedMembers(stopped zookeeperutil.MemberSet) error {
+	c.logger.Infof("Some members are stopped: (%v)", k8sutil.GetMemberNames(stopped))
+
+	// TODO: Consider using a configmap to store the zoo.cfg.dynamic to avoid reconfiguring instead of recalculating
+	// the configured members
+	all := zookeeperutil.MemberSet{}
+	all.Update(c.runningMembers)
+	all.Update(stopped)
+
+	// TODO: we have a pattern: wait-for-error. Need to refactor this.
+	wait := sync.WaitGroup{}
+	wait.Add(len(stopped))
+	errCh := make(chan error, stopped.Size())
+	locker := sync.Mutex{}
+	for _, dead_member := range stopped {
+		go func() {
+			defer wait.Done()
+			err := c.replaceOneDeadMember(dead_member, stopped, &locker)
+			if err != nil {
+				errCh <- err
+			}
+		}()
+	}
+	wait.Wait()
+
+	select {
+	case err := <-errCh:
+		// all errors have been reported before, we only need to inform the controller that there was an error and it should re-try this job once more next time.
+		if err != nil {
+			return err
+		}
+	default:
+	}
+
+	return nil
+}
+
+// TODO: also need to check /config/zookeeper
 func (c *Cluster) IsFinished() bool {
 	return len(c.runningMembers) == c.cluster.Spec.Size
 }
@@ -196,28 +230,6 @@ func isSpecEqual(s1, s2 api.ClusterSpec) bool {
 	return true
 }
 
-func (c *Cluster) StartSeedMember() error {
-	m := c.nextMember()
-	// TODO: @MDF: this fails if someone deletes/recreates a cluster too fast
-	pod, err := c.createPod(make([]string, 0), m, "seed")
-	if err != nil {
-		return fmt.Errorf("failed to create seed member (%s): %v", m.Name, err)
-	}
-	member := (*zookeeperutil.Member)(pod)
-	// Almost impossible, but ...
-	if k8sutil.IsPodReady(pod) {
-		c.runningMembers[member.Name] = member
-	}
-
-	c.logger.Infof("cluster created with seed member (%s)", m.Name)
-	_, err = c.eventsCli.Create(k8sutil.NewMemberAddEvent(m.Name, c.cluster))
-	if err != nil {
-		c.logger.Errorf("failed to create new member add event: %v", err)
-	}
-
-	return nil
-}
-
 func (c *Cluster) setupServices() error {
 	err := k8sutil.CreateClientService(c.config.KubeCli, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner())
 	if err != nil {
@@ -234,8 +246,8 @@ func (c *Cluster) isPodPVEnabled() bool {
 	return false
 }
 
-func (c *Cluster) createPod(existingCluster []string, m *zookeeperutil.Member, state string) (pod *v1.Pod, err error) {
-	pod = k8sutil.NewZookeeperPod(m, existingCluster, c.cluster.Name, state, c.cluster.Spec, c.cluster.AsOwner())
+func (c *Cluster) createPod(m *zookeeperutil.Member, cluster zookeeperutil.MemberSet) (pod *v1.Pod, err error) {
+	pod = k8sutil.NewZookeeperPod(m, cluster, c.cluster.Spec, c.cluster.AsOwner())
 	// TODO: @MDF: add PV support
 	/*
 		if c.isPodPVEnabled() {
@@ -252,14 +264,9 @@ func (c *Cluster) createPod(existingCluster []string, m *zookeeperutil.Member, s
 	return c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Create(pod)
 }
 
-func (c *Cluster) removePod(name string, wait bool) error {
+func (c *Cluster) removePod(name string) error {
 	ns := c.cluster.Namespace
-	gracePeriod := podTerminationGracePeriod
-	if !wait {
-		gracePeriod = int64(0)
-	}
-	opts := metav1.NewDeleteOptions(gracePeriod)
-	err := c.config.KubeCli.CoreV1().Pods(ns).Delete(name, opts)
+	err := c.config.KubeCli.CoreV1().Pods(ns).Delete(name, nil)
 	if err != nil {
 		if !k8sutil.IsKubernetesResourceNotFoundError(err) {
 			return err
@@ -298,22 +305,17 @@ func (c *Cluster) listPods() (pods []*v1.Pod, err error) {
 	return pods, nil
 }
 
-func (c *Cluster) getLivingPodsAndDeleteStoppedPods() (running, ready, unready zookeeperutil.MemberSet, err error) {
+func (c *Cluster) getMembersSeparatedByStatus() (running, unready, stopped zookeeperutil.MemberSet, err error) {
 	pods, err := c.listPods()
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	running_pods, unready_pods, stopped_pods := k8sutil.GetPodsSeparatedByStatus(pods)
 
-	running = make(zookeeperutil.MemberSet)
-	ready = make(zookeeperutil.MemberSet)
-	unready = make(zookeeperutil.MemberSet)
+	running, unready, stopped = zookeeperutil.MemberSet{}, zookeeperutil.MemberSet{}, zookeeperutil.MemberSet{}
 
 	for _, pod := range stopped_pods {
-		err = c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Delete(pod.Name, nil)
-		if err != nil {
-			c.logger.Warn("Fail to delete pod %v: %v", pod.Name, err)
-		}
+		stopped[pod.Name] = (*zookeeperutil.Member)(pod)
 	}
 
 	for _, pod := range unready_pods {
@@ -321,15 +323,10 @@ func (c *Cluster) getLivingPodsAndDeleteStoppedPods() (running, ready, unready z
 	}
 
 	for _, pod := range running_pods {
-		if _, ok := pod.Annotations["waiting"]; ok {
-			ready[pod.Name] = (*zookeeperutil.Member)(pod)
-		} else {
-
-			running[pod.Name] = (*zookeeperutil.Member)(pod)
-		}
+		running[pod.Name] = (*zookeeperutil.Member)(pod)
 	}
 
-	return running, ready, unready, nil
+	return running, unready, stopped, nil
 }
 
 func (c *Cluster) UpdateMemberStatus() {
@@ -429,10 +426,11 @@ func (c *Cluster) logSpecUpdate(oldSpec, newSpec api.ClusterSpec) {
 	}
 }
 
-func (c *Cluster) nextMember() *zookeeperutil.Member {
+// TODO: refactor this method. It's ugly.
+func (c *Cluster) nextMember(memberSet zookeeperutil.MemberSet) *zookeeperutil.Member {
 	return &zookeeperutil.Member{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%v-%v", c.cluster.Name, c.runningMembers.NextMemberID()),
+			Name:      fmt.Sprintf("%v-%v", c.cluster.Name, memberSet.NextMemberID()),
 			Namespace: c.cluster.Namespace,
 		},
 	}
