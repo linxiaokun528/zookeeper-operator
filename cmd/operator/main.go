@@ -22,13 +22,12 @@ import (
 	"os"
 	"runtime"
 	"time"
+	"zookeeper-operator/client"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"zookeeper-operator/chaos"
-	"zookeeper-operator/client"
 	"zookeeper-operator/controller"
 	"zookeeper-operator/util/constants"
-	"zookeeper-operator/util/k8sutil"
 	"zookeeper-operator/util/probe"
 	"zookeeper-operator/version"
 
@@ -59,6 +58,8 @@ var (
 
 	clusterWide bool
 	leaderElect bool
+
+	cli client.Client
 )
 
 func init() {
@@ -98,7 +99,7 @@ func main() {
 		logrus.Fatalf("failed to get hostname: %v", err)
 	}
 
-	kubecli := k8sutil.MustNewKubeClient(masterURL, kubeconfig)
+	cli = client.MustNewClient(masterURL, kubeconfig)
 
 	http.HandleFunc(probe.HTTPReadyzEndpoint, probe.ReadyzHandler)
 	http.Handle("/metrics", promhttp.Handler())
@@ -108,10 +109,10 @@ func main() {
 		namespace,
 		"zookeeper-operator",
 		nil,
-		kubecli.CoordinationV1(),
+		cli.KubernetesInterface().CoordinationV1(),
 		resourcelock.ResourceLockConfig{
 			Identity:      id,
-			EventRecorder: createRecorder(kubecli, name, namespace),
+			EventRecorder: createRecorder(cli.KubernetesInterface(), name, namespace),
 		})
 	if err != nil {
 		logrus.Fatalf("error creating lock: %v", err)
@@ -153,20 +154,17 @@ func run(ctx context.Context) {
 
 	// startChaos(ctx, cfg.KubeCli, cfg.Namespace, chaosLevel)
 
-	c := controller.New(cfg, ctx)
+	c := controller.New(cfg, cli, ctx)
 	c.Start()
 }
 
 func newControllerConfig() controller.Config {
-	kubecli := k8sutil.MustNewKubeClient(masterURL, kubeconfig)
-
 	cfg := controller.Config{
-		Namespace:      namespace,
-		ClusterWide:    clusterWide,
-		KubeCli:        kubecli,
-		KubeExtCli:     k8sutil.MustNewKubeExtClient(masterURL, kubeconfig),
-		ZookeeperCRCli: client.MustNewInCluster(masterURL, kubeconfig),
-		CreateCRD:      createCRD,
+		Namespace:   namespace,
+		ClusterWide: clusterWide,
+		CreateCRD:   createCRD,
+		MasterURL:   masterURL,
+		Kubeconfig:  kubeconfig,
 	}
 
 	return cfg

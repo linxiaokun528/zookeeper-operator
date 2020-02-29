@@ -15,81 +15,53 @@
 package k8sutil
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/util/retryutil"
 
-	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
 )
 
-// TODO: replace this package with Operator client
-
-// ZookeeperClusterCRUpdateFunc is a function to be used when atomically
-// updating a Cluster CR.
-type ZookeeperClusterCRUpdateFunc func(*api.ZookeeperCluster)
-
-func GetClusterList(restcli rest.Interface, ns string) (*api.ZookeeperClusterList, error) {
-	b, err := restcli.Get().RequestURI(listClustersURI(ns)).DoRaw()
-	if err != nil {
-		return nil, err
-	}
-
-	clusters := &api.ZookeeperClusterList{}
-	if err := json.Unmarshal(b, clusters); err != nil {
-		return nil, err
-	}
-	return clusters, nil
+// TODO: Make CRD a struct type
+type CRD interface {
+	Create() error
+	Wait() error
+	CreateAndWait() error
+	CustomResourceDefinition() *apiextensionsv1.CustomResourceDefinition
 }
 
-func listClustersURI(ns string) string {
-	return fmt.Sprintf("/apis/%s/namespaces/%s/%s", api.SchemeGroupVersion.String(), ns, api.ZookeeperClusterResourcePlural)
+type crd struct {
+	client                   apiextensionsclientv1.CustomResourceDefinitionInterface
+	customResourceDefinition *apiextensionsv1.CustomResourceDefinition
 }
 
-func CreateCRD(clientset apiextensionsclient.Interface, crdName, rkind, rplural, shortName string) error {
-	crd := &apiextensionsv1beta1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: crdName,
-		},
-		Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
-			Group:   api.SchemeGroupVersion.Group,
-			Version: api.SchemeGroupVersion.Version,
-			Scope:   apiextensionsv1beta1.NamespaceScoped,
-			Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
-				Plural: rplural,
-				Kind:   rkind,
-			},
-		},
-	}
-	if len(shortName) != 0 {
-		crd.Spec.Names.ShortNames = []string{shortName}
-	}
-	_, err := clientset.ApiextensionsV1beta1().CustomResourceDefinitions().Create(crd)
+func (c *crd) Create() error {
+	customResourceDefinition, err := c.client.Create(c.customResourceDefinition)
 	if err != nil && !IsKubernetesResourceAlreadyExistError(err) {
 		return err
 	}
+	c.customResourceDefinition = customResourceDefinition
 	return nil
 }
 
-func WaitCRDReady(clientset apiextensionsclient.Interface, crdName string) error {
+func (c *crd) Wait() error {
 	err := retryutil.Retry(5*time.Second, 20, func() (bool, error) {
-		crd, err := clientset.ApiextensionsV1beta1().CustomResourceDefinitions().Get(crdName, metav1.GetOptions{})
+		crd, err := c.client.Get(c.customResourceDefinition.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
 		for _, cond := range crd.Status.Conditions {
 			switch cond.Type {
-			case apiextensionsv1beta1.Established:
-				if cond.Status == apiextensionsv1beta1.ConditionTrue {
+			case apiextensionsv1.Established:
+				if cond.Status == apiextensionsv1.ConditionTrue {
 					return true, nil
 				}
-			case apiextensionsv1beta1.NamesAccepted:
-				if cond.Status == apiextensionsv1beta1.ConditionFalse {
+			case apiextensionsv1.NamesAccepted:
+				if cond.Status == apiextensionsv1.ConditionFalse {
 					return false, fmt.Errorf("Name conflict: %v", cond.Reason)
 				}
 			}
@@ -102,10 +74,39 @@ func WaitCRDReady(clientset apiextensionsclient.Interface, crdName string) error
 	return nil
 }
 
-func MustNewKubeExtClient(masterURL string, kubeconfig string) apiextensionsclient.Interface {
-	cfg, err := InClusterConfig(masterURL, kubeconfig)
+func (c *crd) CreateAndWait() error {
+	err := c.Create()
 	if err != nil {
-		panic(err)
+		return nil
 	}
-	return apiextensionsclient.NewForConfigOrDie(cfg)
+
+	return c.Wait()
+}
+
+func (c *crd) CustomResourceDefinition() *apiextensionsv1.CustomResourceDefinition {
+	return c.customResourceDefinition
+}
+
+func NewCRD(client apiextensionsclientv1.CustomResourceDefinitionInterface, crdName, rkind, rplural, shortName string) CRD {
+	customResourceDefinition := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: crdName,
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: api.SchemeGroupVersion.Group,
+			Scope: apiextensionsv1.NamespaceScoped,
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural: rplural,
+				Kind:   rkind,
+			},
+		},
+	}
+	if len(shortName) != 0 {
+		customResourceDefinition.Spec.Names.ShortNames = []string{shortName}
+	}
+
+	return &crd{
+		client:                   client,
+		customResourceDefinition: customResourceDefinition,
+	}
 }

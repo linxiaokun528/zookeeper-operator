@@ -25,31 +25,29 @@ import (
 )
 
 func (c *Cluster) upgradeOneMember(memberName string) error {
-	c.cluster.Status.SetUpgradingCondition(c.cluster.Spec.Version)
+	c.zkCR.Status.SetUpgradingCondition(c.zkCR.Spec.Version)
 
-	ns := c.cluster.Namespace
-
-	pod, err := c.config.KubeCli.CoreV1().Pods(ns).Get(memberName, metav1.GetOptions{})
+	pod, err := c.client.Pod().Get(memberName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("fail to get pod (%s): %v", memberName, err)
 	}
 	oldpod := pod.DeepCopy()
 
-	c.logger.Infof("upgrading the zookeeper member %v from %s to %s", memberName, k8sutil.GetZookeeperVersion(pod), c.cluster.Spec.Version)
-	pod.Spec.Containers[0].Image = k8sutil.ImageName(c.cluster.Spec.Repository, c.cluster.Spec.Version)
-	k8sutil.SetZookeeperVersion(pod, c.cluster.Spec.Version)
+	c.logger.Infof("upgrading the zookeeper member %v from %s to %s", memberName, k8sutil.GetZookeeperVersion(pod), c.zkCR.Spec.Version)
+	pod.Spec.Containers[0].Image = k8sutil.ImageName(c.zkCR.Spec.Repository, c.zkCR.Spec.Version)
+	k8sutil.SetZookeeperVersion(pod, c.zkCR.Spec.Version)
 
 	patchdata, err := k8sutil.CreatePatch(oldpod, pod, v1.Pod{})
 	if err != nil {
 		return fmt.Errorf("error creating patch: %v", err)
 	}
 
-	_, err = c.config.KubeCli.CoreV1().Pods(ns).Patch(pod.GetName(), types.StrategicMergePatchType, patchdata)
+	_, err = c.client.Pod().Patch(pod.GetName(), types.StrategicMergePatchType, patchdata)
 	if err != nil {
 		return fmt.Errorf("fail to update the zookeeper member (%s): %v", memberName, err)
 	}
 	c.logger.Infof("finished upgrading the zookeeper member %v", memberName)
-	_, err = c.eventsCli.Create(k8sutil.MemberUpgradedEvent(memberName, k8sutil.GetZookeeperVersion(oldpod), c.cluster.Spec.Version, c.cluster))
+	_, err = c.client.Event().Create(k8sutil.MemberUpgradedEvent(memberName, k8sutil.GetZookeeperVersion(oldpod), c.zkCR.Spec.Version, c.zkCR))
 	if err != nil {
 		c.logger.Errorf("failed to create member upgraded event: %v", err)
 	}

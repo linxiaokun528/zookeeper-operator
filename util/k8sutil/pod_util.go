@@ -26,6 +26,8 @@ const (
 	zookeeperTlogVolumeName = "zookeeper-tlog"
 )
 
+// TODO: like k8sutil/crd.go, We should have a type call Pod, and the type has functions like create/delete/replace etc...
+
 func zookeeperVolumeMounts() []v1.VolumeMount {
 	return []v1.VolumeMount{
 		{Name: zookeeperDataVolumeName, MountPath: zookeeperDataVolumeMountDir},

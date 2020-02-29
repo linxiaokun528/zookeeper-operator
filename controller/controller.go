@@ -20,19 +20,16 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"time"
+	"zookeeper-operator/client"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/cluster"
-	"zookeeper-operator/generated/clientset/versioned"
 	zkInformer "zookeeper-operator/generated/informers/externalversions/zookeeper/v1alpha1"
-	"zookeeper-operator/util"
 	"zookeeper-operator/util/k8sutil"
 
 	"github.com/sirupsen/logrus"
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	kwatch "k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes"
 )
 
 var initRetryWaitTime = 30 * time.Second
@@ -43,11 +40,12 @@ type Event struct {
 }
 
 type Controller struct {
-	logger *logrus.Entry
 	Config
 
-	ctx      context.Context
-	clusters map[string]*util.Tuple
+	logger *logrus.Entry
+
+	client client.Client
+	ctx    context.Context
 
 	eventQueue workqueue.RateLimitingInterface
 	zkInformer zkInformer.ZookeeperClusterInformer
@@ -57,19 +55,17 @@ type Config struct {
 	Namespace      string
 	ClusterWide    bool
 	ServiceAccount string
-	KubeCli        kubernetes.Interface
-	KubeExtCli     apiextensionsclient.Interface
-	ZookeeperCRCli versioned.Interface
 	CreateCRD      bool
+	MasterURL      string
+	Kubeconfig     string
 }
 
-func New(cfg Config, ctx context.Context) *Controller {
+func New(cfg Config, client client.Client, ctx context.Context) *Controller {
 	return &Controller{
 		logger: logrus.WithField("pkg", "controller"),
-
-		Config:   cfg,
-		ctx:      ctx,
-		clusters: make(map[string]*util.Tuple),
+		Config: cfg,
+		ctx:    ctx,
+		client: client,
 	}
 }
 
@@ -111,7 +107,7 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 	}
 
 	sharedCluster = sharedCluster.DeepCopy()
-	zkCluster := cluster.New(c.makeClusterConfig(), sharedCluster)
+	zkCluster := cluster.New(c.client.GetCRClient(sharedCluster.Namespace), sharedCluster)
 	defer func() {
 		if !zkCluster.IsFinished() {
 			c.eventQueue.AddAfter(key, 30*time.Second)
@@ -143,17 +139,8 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 	return true, nil
 }
 
-func (c *Controller) makeClusterConfig() cluster.Config {
-	return cluster.Config{
-		KubeCli:        c.Config.KubeCli,
-		ZookeeperCRCli: c.Config.ZookeeperCRCli,
-	}
-}
-
 func (c *Controller) initCRD() error {
-	err := k8sutil.CreateCRD(c.KubeExtCli, api.ZookeeperClusterCRDName, api.ZookeeperClusterResourceKind, api.ZookeeperClusterResourcePlural, "zookeeper")
-	if err != nil {
-		return fmt.Errorf("failed to create CRD: %v", err)
-	}
-	return k8sutil.WaitCRDReady(c.KubeExtCli, api.ZookeeperClusterCRDName)
+	crd := k8sutil.NewCRD(c.client.GetCRDClient(), api.ZookeeperClusterCRDName, api.ZookeeperClusterResourceKind,
+		api.ZookeeperClusterResourcePlural, "zookeeper")
+	return crd.CreateAndWait()
 }

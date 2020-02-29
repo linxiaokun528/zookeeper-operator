@@ -20,7 +20,7 @@ import (
 
 var ReconcileHistogram = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: "zookeeper_operator",
-	Subsystem: "cluster",
+	Subsystem: "zkCR",
 	Name:      "reconcile_duration",
 	Help:      "Reconcile duration histogram in second",
 	Buckets:   prometheus.ExponentialBuckets(0.1, 2, 10),
@@ -30,7 +30,7 @@ var ReconcileHistogram = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 
 var ReconcileFailed = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: "zookeeper_operator",
-	Subsystem: "cluster",
+	Subsystem: "zkCR",
 	Name:      "reconcile_failed",
 	Help:      "Total number of failed reconcilations",
 },

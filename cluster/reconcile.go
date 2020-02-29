@@ -23,22 +23,21 @@ import (
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/util/k8sutil"
 	"zookeeper-operator/util/zookeeperutil"
-
-	"k8s.io/api/core/v1"
 )
 
-// ErrLostQuorum indicates that the zookeeper cluster lost its quorum.
+// ErrLostQuorum indicates that the zookeeper zkCR lost its quorum.
 var ErrLostQuorum = errors.New("lost quorum")
 
-// Reconcile reconciles cluster current state to desired state specified by spec.
-// - it tries to Reconcile the cluster to desired size.
-// - if the cluster needs for upgrade, it tries to upgrade old member one by one.
+// Reconcile reconciles zkCR current state to desired state specified by spec.
+// - it tries to Reconcile the zkCR to desired size.
+// - if the zkCR needs for upgrade, it tries to upgrade old member one by one.
 func (c *Cluster) Reconcile() error {
 	c.logger.Infoln("Start reconciling")
 	defer c.logger.Infoln("Finish reconciling")
 
 	defer func() {
-		c.cluster.Status.Size = c.runningMembers.Size()
+		// TODO: it's not correct
+		c.zkCR.Status.Size = c.zkStatus.GetRunningMembers().Size()
 	}()
 
 	err := c.configCluster()
@@ -47,22 +46,22 @@ func (c *Cluster) Reconcile() error {
 	}
 
 	// If not enough are running or membership size != spec size then maybe resize
-	if c.runningMembers.Size() != c.cluster.Spec.Size {
+	if c.zkStatus.GetRunningMembers().Size() != c.zkCR.Spec.Size {
 		return c.resize()
 	}
-	c.cluster.Status.ClearCondition(api.ClusterConditionScaling)
+	c.zkCR.Status.ClearCondition(api.ClusterConditionScaling)
 
 	// TODO: @MDF: Try and upgrade the leader last, that way we don't bounce it around repeatedly
 	if c.needUpgrade() {
-		c.cluster.Status.UpgradeVersionTo(c.cluster.Spec.Version)
+		c.zkCR.Status.UpgradeVersionTo(c.zkCR.Spec.Version)
 
 		m := c.pickOneOldMember()
-		return c.upgradeOneMember(m.Name)
+		return c.upgradeOneMember(m.Name())
 	}
-	c.cluster.Status.ClearCondition(api.ClusterConditionUpgrading)
+	c.zkCR.Status.ClearCondition(api.ClusterConditionUpgrading)
 
-	c.cluster.Status.SetVersion(c.cluster.Spec.Version)
-	c.cluster.Status.SetReadyCondition()
+	c.zkCR.Status.SetVersion(c.zkCR.Spec.Version)
+	c.zkCR.Status.SetReadyCondition()
 
 	return nil
 }
@@ -74,22 +73,24 @@ func (c *Cluster) configCluster() error {
 	}
 
 	if need_reconfig {
-		return c.reconfig(c.runningMembers.ClientHostList(), c.runningMembers.ClusterConfig())
+		return c.reconfig(c.zkStatus.GetRunningMembers().GetClientHosts(),
+			c.zkStatus.GetRunningMembers().GetClusterConfig())
 	}
 
 	return nil
 }
 
 func (c *Cluster) needReconfig() (bool, error) {
-	if c.runningMembers.Size() == 0 {
+	if c.zkStatus.GetRunningMembers().Size() == 0 {
 		return false, nil
 	}
-	actualConfig, err := zookeeperutil.GetClusterConfig(c.runningMembers.ClientHostList())
+	actualConfig, err := zookeeperutil.GetClusterConfig(c.zkStatus.GetRunningMembers().GetClientHosts())
 	if err != nil {
-		c.logger.Info("Failed to get configure from zookeeper: %v", c.runningMembers.ClientHostList())
+		c.logger.Info("Failed to get configure from zookeeper: %v",
+			c.zkStatus.GetRunningMembers().GetClientHosts())
 		return false, err
 	}
-	expectedConfig := c.runningMembers.ClusterConfig()
+	expectedConfig := c.zkStatus.GetRunningMembers().GetClusterConfig()
 
 	sort.Strings(actualConfig)
 	sort.Strings(expectedConfig)
@@ -97,7 +98,7 @@ func (c *Cluster) needReconfig() (bool, error) {
 }
 
 func (c *Cluster) reconfig(hosts []string, desiredConfig []string) error {
-	c.logger.Infoln("Reconfiguring ZK cluster")
+	c.logger.Infoln("Reconfiguring ZK %v", c.zkCR.Name)
 	err := zookeeperutil.ReconfigureCluster(hosts, desiredConfig)
 	if err != nil {
 		c.logger.Infoln("Reconfigure error")
@@ -108,11 +109,11 @@ func (c *Cluster) reconfig(hosts []string, desiredConfig []string) error {
 }
 
 func (c *Cluster) resize() error {
-	if c.runningMembers.Size() == c.cluster.Spec.Size {
+	if c.zkStatus.GetRunningMembers().Size() == c.zkCR.Spec.Size {
 		return nil
 	}
 
-	if c.runningMembers.Size() < c.cluster.Spec.Size {
+	if c.zkStatus.GetRunningMembers().Size() < c.zkCR.Spec.Size {
 		return c.scaleUp()
 	}
 
@@ -120,39 +121,33 @@ func (c *Cluster) resize() error {
 }
 
 func (c *Cluster) scaleUp() error {
-	c.cluster.Status.SetScalingUpCondition(c.runningMembers.Size(), c.cluster.Spec.Size)
-	all := zookeeperutil.MemberSet{}
-	all.Update(c.runningMembers)
-	diff := c.cluster.Spec.Size - c.runningMembers.Size()
-	newMembers := zookeeperutil.MemberSet{}
-	for id := 0; id < diff; id++ {
-		newMember := c.nextMember(all)
-		newMembers.Add(newMember)
-		all.Add(newMember)
-	}
+	c.zkCR.Status.SetScalingUpCondition(c.zkStatus.GetRunningMembers().Size(), c.zkCR.Spec.Size)
+	diff := c.zkCR.Spec.Size - c.zkStatus.GetRunningMembers().Size()
+	newMembers := c.zkStatus.AddMembers(diff)
+	all := c.zkStatus.GetRunningMembers().Copy()
 	all.Update(newMembers)
-	return c.addMembers(newMembers, all)
-}
 
-func (c *Cluster) addMembers(newMembers zookeeperutil.MemberSet, newCluster zookeeperutil.MemberSet) error {
 	wait := sync.WaitGroup{}
 	wait.Add(newMembers.Size())
+	errCh := make(chan error)
 
-	errCh := make(chan error, newMembers.Size())
 	for _, member := range newMembers {
-		go func(newMember *zookeeperutil.Member, newCluster zookeeperutil.MemberSet) {
+		go func(newMember *zookeeperutil.Member, allClusterMembers zookeeperutil.Members) {
 			defer wait.Done()
-			err := c.addOneMember(newMember, newCluster)
+			err := c.addOneMember(newMember, allClusterMembers)
 			if err != nil {
 				errCh <- err
+				c.locker.Lock()
+				c.zkStatus.GetUnreadyMembers().Remove(member.ID())
+				c.locker.Unlock()
 			}
-		}(member, newCluster)
+		}(member, all)
 	}
 	wait.Wait()
 
 	select {
 	case err := <-errCh:
-		// all errors have been reported before, we only need to inform the controller that there was an error and it should re-try this job once more next time.
+		// all errors have been reported before, we only need to inform the controller that there was an error and it should re-try this once more next time.
 		if err != nil {
 			return err
 		}
@@ -162,15 +157,16 @@ func (c *Cluster) addMembers(newMembers zookeeperutil.MemberSet, newCluster zook
 	return nil
 }
 
-// TODO: use configmap to avoid the parameter "cluster"
-func (c *Cluster) addOneMember(m *zookeeperutil.Member, cluster zookeeperutil.MemberSet) error {
-	_, err := c.createPod(m, cluster)
+// TODO: use configmap to avoid the second parameter
+// The member added will be in c.zkStatus.unready
+func (c *Cluster) addOneMember(m *zookeeperutil.Member, allClusterMembers zookeeperutil.Members) error {
+	_, err := c.createPod(m, allClusterMembers)
 	if err != nil {
-		return fmt.Errorf("fail to create member's pod (%s): %v", m.Name, err)
+		return fmt.Errorf("fail to create member's pod (%s): %v", m.Name(), err)
 	}
 
-	c.logger.Infof("added member (%s)", m.Name)
-	_, err = c.eventsCli.Create(k8sutil.NewMemberAddEvent(m.Name, c.cluster))
+	c.logger.Infof("added member (%s)", m.Name())
+	_, err = c.client.Event().Create(k8sutil.NewMemberAddEvent(m.Name(), c.zkCR))
 	if err != nil {
 		c.logger.Errorf("failed to create new member add event: %v", err)
 	}
@@ -178,40 +174,64 @@ func (c *Cluster) addOneMember(m *zookeeperutil.Member, cluster zookeeperutil.Me
 }
 
 func (c *Cluster) scaleDown() error {
-	c.cluster.Status.SetScalingDownCondition(c.runningMembers.Size(), c.cluster.Spec.Size)
-	diff := c.runningMembers.Size() - c.cluster.Spec.Size
+	c.zkCR.Status.SetScalingDownCondition(c.zkStatus.GetRunningMembers().Size(), c.zkCR.Spec.Size)
+	diff := c.zkStatus.GetRunningMembers().Size() - c.zkCR.Spec.Size
 
-	membersToRemove := zookeeperutil.MemberSet{}
-	copy := zookeeperutil.MemberSet{}
-	copy.Update(c.runningMembers)
-	for i := 0; i < diff; i++ {
-		memberToRemove := copy.PickOneToRemove()
-		membersToRemove.Add(memberToRemove)
-		copy.Remove(memberToRemove.Name)
-	}
+	membersToRemove := c.zkStatus.RemoveMembers(diff)
 
-	newCluster := c.runningMembers.Diff(membersToRemove)
-	return c.removeMembers(membersToRemove, newCluster)
-}
-
-func (c *Cluster) removeMembers(membersToMove zookeeperutil.MemberSet, newCluster zookeeperutil.MemberSet) error {
-	err := c.reconfig(newCluster.ClientHostList(), newCluster.ClusterConfig())
+	err := c.reconfig(c.zkStatus.GetRunningMembers().GetClientHosts(), c.zkStatus.GetRunningMembers().GetClusterConfig())
 	if err != nil {
+		c.zkStatus.GetRunningMembers().Update(membersToRemove)
 		return err
 	}
 
-	errCh := make(chan error, membersToMove.Size())
+	errCh := make(chan error)
 	wait := sync.WaitGroup{}
-	wait.Add(membersToMove.Size())
-	locker := sync.Mutex{}
-	for _, m := range membersToMove {
+	wait.Add(membersToRemove.Size())
+	for _, m := range membersToRemove {
 		go func(member *zookeeperutil.Member) {
 			defer wait.Done()
-			err := c.removeOneMember(member, &locker)
+			err := c.removeOneMember(member)
+			if err != nil {
+				errCh <- err
+				c.locker.Lock()
+				c.zkStatus.GetRunningMembers().Add(member)
+				c.locker.Unlock()
+			}
+		}(m)
+	}
+	wait.Wait()
+
+	select {
+	case err := <-errCh:
+		// all errors have been reported before, we only need to inform the controller that there was an error and it should re-try this once more next time.
+		if err != nil {
+			return err
+		}
+	default:
+	}
+
+	return nil
+}
+
+func (c *Cluster) ReplaceStoppedMembers() error {
+	c.logger.Infof("Some members are stopped: (%v)", c.zkStatus.GetStoppedMembers().GetMemberNames())
+
+	all := c.zkStatus.GetRunningMembers().Copy()
+	all.Update(c.zkStatus.GetStoppedMembers())
+
+	// TODO: we have a pattern: wait-for-error. Need to refactor this.
+	wait := sync.WaitGroup{}
+	wait.Add(c.zkStatus.GetStoppedMembers().Size())
+	errCh := make(chan error)
+	for _, dead_member := range c.zkStatus.GetStoppedMembers() {
+		go func() {
+			defer wait.Done()
+			err := c.replaceOneStoppedMember(dead_member, all)
 			if err != nil {
 				errCh <- err
 			}
-		}(m)
+		}()
 	}
 	wait.Wait()
 
@@ -227,30 +247,34 @@ func (c *Cluster) removeMembers(membersToMove zookeeperutil.MemberSet, newCluste
 	return nil
 }
 
-func (c *Cluster) replaceOneDeadMember(toReplace *zookeeperutil.Member, cluster zookeeperutil.MemberSet, locker sync.Locker) error {
+func (c *Cluster) replaceOneStoppedMember(toReplace *zookeeperutil.Member, cluster zookeeperutil.Members) error {
 	c.logger.Infof("replacing dead member %q", toReplace.Name)
-	_, err := c.eventsCli.Create(k8sutil.ReplacingDeadMemberEvent(toReplace.Name, c.cluster))
+
+	err := c.removeOneMember(toReplace)
+	if err != nil {
+		return err
+	}
+	c.locker.Lock()
+	c.zkStatus.GetStoppedMembers().Remove(toReplace.ID())
+	c.locker.Unlock()
+
+	err = c.addOneMember(toReplace, cluster)
+	if err != nil {
+		return err
+	}
+	c.zkStatus.GetUnreadyMembers().Add(toReplace)
+
+	_, err = c.client.Event().Create(k8sutil.ReplacingDeadMemberEvent(toReplace.Name(), c.zkCR))
 	if err != nil {
 		c.logger.Errorf("failed to create replacing dead member event: %v", err)
 	}
 
-	err = c.removeOneMember(toReplace, locker)
-	if err != nil {
-		return err
-	}
-
-	return c.addOneMember(toReplace, cluster)
+	return nil
 }
 
-// Remember to reconfig the zookeeper cluster before invoking this function
-func (c *Cluster) removeOneMember(m *zookeeperutil.Member, locker sync.Locker) (err error) {
-	defer func() {
-		if err != nil {
-			err = fmt.Errorf("remove member (%s) failed: %v", m.Name, err)
-		}
-	}()
-
-	if err := c.removePod(m.Name); err != nil {
+// Remember to reconfig the zookeeper zkCR before invoking this function
+func (c *Cluster) removeOneMember(m *zookeeperutil.Member) (err error) {
+	if err := c.removePod(m.Name()); err != nil {
 		return err
 	}
 	// TODO: @MDF: Add PV support
@@ -263,14 +287,7 @@ func (c *Cluster) removeOneMember(m *zookeeperutil.Member, locker sync.Locker) (
 		}
 	*/
 
-	if locker != nil {
-		locker.Lock()
-	}
-	c.runningMembers.Remove(m.Name)
-	if locker != nil {
-		locker.Unlock()
-	}
-	_, err = c.eventsCli.Create(k8sutil.MemberRemoveEvent(m.Name, c.cluster))
+	_, err = c.client.Event().Create(k8sutil.MemberRemoveEvent(m.Name(), c.zkCR))
 	if err != nil {
 		c.logger.Errorf("failed to create remove member event: %v", err)
 	}
@@ -279,21 +296,13 @@ func (c *Cluster) removeOneMember(m *zookeeperutil.Member, locker sync.Locker) (
 	return nil
 }
 
-func (c *Cluster) removePVC(pvcName string) error {
-	err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Delete(pvcName, nil)
-	if err != nil && !k8sutil.IsKubernetesResourceNotFoundError(err) {
-		return fmt.Errorf("remove pvc (%s) failed: %v", pvcName, err)
-	}
-	return nil
-}
-
 func (c *Cluster) needUpgrade() bool {
-	return c.runningMembers.Size() == c.cluster.Spec.Size && c.pickOneOldMember() != nil
+	return c.zkStatus.GetRunningMembers().Size() == c.zkCR.Spec.Size && c.pickOneOldMember() != nil
 }
 
 func (c *Cluster) pickOneOldMember() *zookeeperutil.Member {
-	for _, member := range c.runningMembers {
-		if k8sutil.GetZookeeperVersion((*v1.Pod)(member)) == c.cluster.Spec.Version {
+	for _, member := range c.zkStatus.GetRunningMembers() {
+		if member.Version() == c.zkCR.Spec.Version {
 			continue
 		}
 		return member

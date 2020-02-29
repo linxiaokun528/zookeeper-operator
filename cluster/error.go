@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	errCreatedCluster = errors.New("cluster failed to be created")
+	errCreatedCluster = errors.New("zkCR failed to be created")
 )
 
 type fatalError struct {

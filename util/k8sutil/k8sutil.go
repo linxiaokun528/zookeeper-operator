@@ -17,15 +17,11 @@ package k8sutil
 import (
 	"encoding/json"
 	"fmt"
-	"k8s.io/client-go/tools/clientcmd"
-	"net"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/util/retryutil"
 	"zookeeper-operator/util/zookeeperutil"
 
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
@@ -39,7 +35,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // for gcp auth
-	"k8s.io/client-go/rest"
 )
 
 const (
@@ -72,13 +67,6 @@ func SetZookeeperVersion(pod *v1.Pod, version string) {
 	pod.Annotations[zookeeperVersionAnnotationKey] = version
 }
 
-func GetMemberNames(members zookeeperutil.MemberSet) (res []string) {
-	for name, _ := range members {
-		res = append(res, name)
-	}
-	return res
-}
-
 // PVCNameFromMember the way we get PVC name from the member name
 func PVCNameFromMember(memberName string) string {
 	return memberName
@@ -101,21 +89,17 @@ func PodWithNodeSelector(p *v1.Pod, ns map[string]string) *v1.Pod {
 	return p
 }
 
-func CreateClientService(kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference) error {
+func NewClientService(clusterName string) *v1.Service {
 	ports := []v1.ServicePort{{
 		Name:       "client",
 		Port:       ZookeeperClientPort,
 		TargetPort: intstr.FromInt(ZookeeperClientPort),
 		Protocol:   v1.ProtocolTCP,
 	}}
-	return createService(kubecli, ClientServiceName(clusterName), clusterName, ns, "", ports, owner)
+	return newService(clusterName+"-client", clusterName, "", ports)
 }
 
-func ClientServiceName(clusterName string) string {
-	return clusterName + "-client"
-}
-
-func CreatePeerService(kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference) error {
+func NewPeerService(clusterName string) *v1.Service {
 	ports := []v1.ServicePort{{
 		Name:       "client",
 		Port:       ZookeeperClientPort,
@@ -133,54 +117,10 @@ func CreatePeerService(kubecli kubernetes.Interface, clusterName, ns string, own
 		Protocol:   v1.ProtocolTCP,
 	}}
 
-	return createService(kubecli, clusterName, clusterName, ns, v1.ClusterIPNone, ports, owner)
+	return newService(clusterName, clusterName, v1.ClusterIPNone, ports)
 }
 
-func createService(kubecli kubernetes.Interface, svcName, clusterName, ns, clusterIP string, ports []v1.ServicePort, owner metav1.OwnerReference) error {
-	svc := newZookeeperServiceManifest(svcName, clusterName, clusterIP, ports)
-	addOwnerRefToObject(svc.GetObjectMeta(), owner)
-	_, err := kubecli.CoreV1().Services(ns).Create(svc)
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return err
-	}
-	return nil
-}
-
-// CreateAndWaitPod creates a pod and waits until it is running
-func CreateAndWaitPod(kubecli kubernetes.Interface, ns string, pod *v1.Pod, timeout time.Duration) (*v1.Pod, error) {
-	_, err := kubecli.CoreV1().Pods(ns).Create(pod)
-	if err != nil {
-		return nil, err
-	}
-
-	interval := 5 * time.Second
-	var retPod *v1.Pod
-	err = retryutil.Retry(interval, int(timeout/(interval)), func() (bool, error) {
-		retPod, err = kubecli.CoreV1().Pods(ns).Get(pod.Name, metav1.GetOptions{})
-		if err != nil {
-			return false, err
-		}
-		switch retPod.Status.Phase {
-		case v1.PodRunning:
-			return true, nil
-		case v1.PodPending:
-			return false, nil
-		default:
-			return false, fmt.Errorf("unexpected pod status.phase: %v", retPod.Status.Phase)
-		}
-	})
-
-	if err != nil {
-		if retryutil.IsRetryFailure(err) {
-			return nil, fmt.Errorf("failed to wait pod running, it is still pending: %v", err)
-		}
-		return nil, fmt.Errorf("failed to wait pod running: %v", err)
-	}
-
-	return retPod, nil
-}
-
-func newZookeeperServiceManifest(svcName, clusterName, clusterIP string, ports []v1.ServicePort) *v1.Service {
+func newService(svcName, clusterName, clusterIP string, ports []v1.ServicePort) *v1.Service {
 	labels := LabelsForCluster(clusterName)
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -211,14 +151,14 @@ func AddZookeeperVolumeToPod(pod *v1.Pod, pvc *v1.PersistentVolumeClaim) {
 	pod.Spec.Volumes = append(pod.Spec.Volumes, vol)
 }
 
-func addOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
+func AddOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 	o.SetOwnerReferences(append(o.GetOwnerReferences(), r))
 }
 
-func NewZookeeperPod(m *zookeeperutil.Member, cluster zookeeperutil.MemberSet, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
+func NewZookeeperPod(m *zookeeperutil.Member, cluster zookeeperutil.Members, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
 	labels := map[string]string{
 		"app":               "zookeeper",
-		"zookeeper_node":    m.Name,
+		"zookeeper_node":    m.Name(),
 		"zookeeper_cluster": m.ClusterName(),
 	}
 
@@ -239,7 +179,7 @@ func NewZookeeperPod(m *zookeeperutil.Member, cluster zookeeperutil.MemberSet, c
 		Value: strconv.Itoa(m.ID()),
 	}, v1.EnvVar{
 		Name:  "ZOO_SERVERS",
-		Value: strings.Join(cluster.ClusterConfig(), " "),
+		Value: strings.Join(cluster.GetClusterConfig(), " "),
 	}, v1.EnvVar{
 		Name:  "ZOO_MAX_CLIENT_CNXNS",
 		Value: "0", // default 60
@@ -263,7 +203,7 @@ func NewZookeeperPod(m *zookeeperutil.Member, cluster zookeeperutil.MemberSet, c
 	fsGroup := podUID
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        m.Name,
+			Name:        m.Name(),
 			Labels:      labels,
 			Annotations: map[string]string{},
 		},
@@ -288,7 +228,7 @@ done`, m.Addr())},
 			// DNS A record: `[m.Name].[clusterName].Namespace.svc`
 			// For example, zookeeper-795649v9kq in default namespace will have DNS name
 			// `zookeeper-795649v9kq.zookeeper.default.svc`.
-			Hostname:                     m.Name,
+			Hostname:                     m.Name(),
 			Subdomain:                    m.ClusterName(),
 			AutomountServiceAccountToken: func(b bool) *bool { return &b }(false),
 			SecurityContext: &v1.PodSecurityContext{
@@ -301,40 +241,8 @@ done`, m.Addr())},
 	// TODO: make this function "SetAnnotations"
 	SetZookeeperVersion(pod, cs.Version)
 	applyPodPolicy(m.ClusterName(), pod, cs.Pod)
-	addOwnerRefToObject(pod.GetObjectMeta(), owner)
+	AddOwnerRefToObject(pod.GetObjectMeta(), owner)
 	return pod
-}
-
-func MustNewKubeClient(masterURL string, kubeconfig string) kubernetes.Interface {
-	cfg, err := InClusterConfig(masterURL, kubeconfig)
-	if err != nil {
-		panic(err)
-	}
-	return kubernetes.NewForConfigOrDie(cfg)
-}
-
-func InClusterConfig(masterURL string, kubeconfig string) (*rest.Config, error) {
-	// Work around https://github.com/kubernetes/kubernetes/issues/40973
-	// See https://github.com/coreos/etcd-operator/issues/731#issuecomment-283804819
-	if len(os.Getenv("KUBERNETES_SERVICE_HOST")) == 0 {
-		addrs, err := net.LookupHost("kubernetes.default.svc")
-		if err != nil {
-			panic(err)
-		}
-		os.Setenv("KUBERNETES_SERVICE_HOST", addrs[0])
-	}
-	if len(os.Getenv("KUBERNETES_SERVICE_PORT")) == 0 {
-		os.Setenv("KUBERNETES_SERVICE_PORT", "443")
-	}
-
-	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
-	// cfg, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, err
-	}
-	// Set a reasonable default request timeout
-	cfg.Timeout = defaultKubeAPIRequestTimeout
-	return cfg, nil
 }
 
 func IsKubernetesResourceAlreadyExistError(err error) bool {
