@@ -94,6 +94,8 @@ func (c *Cluster) needReconfig() (bool, error) {
 
 	sort.Strings(actualConfig)
 	sort.Strings(expectedConfig)
+
+	// TODO: What if we successfully reconfig but fail to delete pods?
 	return !reflect.DeepEqual(expectedConfig, actualConfig), nil
 }
 
@@ -157,7 +159,6 @@ func (c *Cluster) scaleUp() error {
 	return nil
 }
 
-// TODO: use configmap to avoid the second parameter
 // The member added will be in c.zkStatus.unready
 func (c *Cluster) addOneMember(m *zookeeperutil.Member, allClusterMembers zookeeperutil.Members) error {
 	_, err := c.createPod(m, allClusterMembers)

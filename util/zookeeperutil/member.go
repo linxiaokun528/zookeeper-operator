@@ -138,6 +138,7 @@ func (ms Members) GetClusterConfig() []string {
 	return clusterConfig
 }
 
+// TODO: Make this struct a property of zookeeper CR
 type ZKCluster struct {
 	*clusterID
 	running Members

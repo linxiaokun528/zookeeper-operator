@@ -20,53 +20,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
-	"net"
-	"os"
-	"time"
 	"zookeeper-operator/generated/clientset/versioned"
 	"zookeeper-operator/generated/clientset/versioned/typed/zookeeper/v1alpha1"
-
-	"k8s.io/client-go/rest"
 )
 
-const (
-	defaultKubeAPIRequestTimeout = 5 * time.Minute
-)
-
-func inClusterConfig(masterURL string, kubeconfig string) (*rest.Config, error) {
-	// Work around https://github.com/kubernetes/kubernetes/issues/40973
-	// See https://github.com/coreos/etcd-operator/issues/731#issuecomment-283804819
-	if len(os.Getenv("KUBERNETES_SERVICE_HOST")) == 0 {
-		addrs, err := net.LookupHost("kubernetes.default.svc")
-		if err != nil {
-			panic(err)
-		}
-		os.Setenv("KUBERNETES_SERVICE_HOST", addrs[0])
-	}
-	if len(os.Getenv("KUBERNETES_SERVICE_PORT")) == 0 {
-		os.Setenv("KUBERNETES_SERVICE_PORT", "443")
-	}
-
-	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
-	// cfg, err := rest.inClusterConfig()
-	if err != nil {
-		return nil, err
-	}
-	// Set a reasonable default request timeout
-	cfg.Timeout = defaultKubeAPIRequestTimeout
-	return cfg, nil
-}
-
-func mustGetClusterConfig(masterURL string, kubeconfig string) *rest.Config {
-	cfg, err := inClusterConfig(masterURL, kubeconfig)
+func NewClientOrDie(masterURL string, kubeconfigPath string) Client {
+	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfigPath)
 	if err != nil {
 		panic(err)
 	}
-	return cfg
-}
-
-func MustNewClient(masterURL string, kubeconfig string) Client {
-	cfg := mustGetClusterConfig(masterURL, kubeconfig)
 	return &clientsets{
 		kubeCli:   kubernetes.NewForConfigOrDie(cfg),
 		apiExtCli: apiextensionsclient.NewForConfigOrDie(cfg),

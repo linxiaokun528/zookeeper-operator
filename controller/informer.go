@@ -15,44 +15,26 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
 	"time"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/tools/cache"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	zkInformers "zookeeper-operator/generated/informers/externalversions"
 	"zookeeper-operator/util/k8sutil"
-	"zookeeper-operator/util/probe"
-
-	"k8s.io/client-go/tools/cache"
 )
 
-func (c *Controller) Start() {
-	// TODO: get rid of this init code. CRD and storage class will be managed outside of operator.
-	for {
-		err := c.initResource()
-		if err == nil {
-			break
-		}
-		c.logger.Errorf("initialization failed: %v", err)
-		c.logger.Infof("retry in %v...", initRetryWaitTime)
-		time.Sleep(initRetryWaitTime)
-	}
-
-	probe.SetReady()
-	c.run()
-	//panic("unreachable")
-}
-
-func (c *Controller) run() {
+func (c *Controller) Run(ctx context.Context) {
 	c.eventQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "events")
 	defer utilruntime.HandleCrash()
 	defer c.eventQueue.ShutDown()
 
 	sharedInformerFactory := zkInformers.NewSharedInformerFactory(c.client.ZookeeperInterface(), time.Minute*2)
-	go sharedInformerFactory.Start(c.ctx.Done())
+	go sharedInformerFactory.Start(ctx.Done())
 
 	c.zkInformer = sharedInformerFactory.Zookeeper().V1alpha1().ZookeeperClusters()
 	c.zkInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -61,16 +43,16 @@ func (c *Controller) run() {
 		DeleteFunc: c.onDeleteZookeeperClus,
 	})
 
-	if !cache.WaitForNamedCacheSync("zookeeper", c.ctx.Done(), c.zkInformer.Informer().HasSynced) {
+	if !cache.WaitForNamedCacheSync("zookeeper", ctx.Done(), c.zkInformer.Informer().HasSynced) {
 		return
 	}
 
 	for i := 0; i < 5; i++ {
-		go wait.Until(c.worker, time.Second, c.ctx.Done())
+		go wait.Until(c.worker, time.Second, ctx.Done())
 	}
 
 	// TODO: use workqueue to avoid blocking
-	c.zkInformer.Informer().Run(c.ctx.Done())
+	c.zkInformer.Informer().Run(ctx.Done())
 	c.eventQueue.ShutDown()
 }
 
@@ -78,16 +60,6 @@ func (c *Controller) worker() {
 	// invoked oncely process any until exhausted
 	for c.processNextWorkItem() {
 	}
-}
-
-func (c *Controller) initResource() error {
-	if c.Config.CreateCRD {
-		err := c.initCRD()
-		if err != nil {
-			return fmt.Errorf("fail to init CRD: %v", err)
-		}
-	}
-	return nil
 }
 
 func (c *Controller) onAddZookeeperClus(obj interface{}) {

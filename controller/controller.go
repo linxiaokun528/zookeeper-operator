@@ -15,21 +15,18 @@
 package controller
 
 import (
-	"context"
 	"fmt"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"time"
 	"zookeeper-operator/client"
 
+	"github.com/sirupsen/logrus"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	kwatch "k8s.io/apimachinery/pkg/watch"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/cluster"
 	zkInformer "zookeeper-operator/generated/informers/externalversions/zookeeper/v1alpha1"
-	"zookeeper-operator/util/k8sutil"
-
-	"github.com/sirupsen/logrus"
-	kwatch "k8s.io/apimachinery/pkg/watch"
 )
 
 var initRetryWaitTime = 30 * time.Second
@@ -45,26 +42,19 @@ type Controller struct {
 	logger *logrus.Entry
 
 	client client.Client
-	ctx    context.Context
 
 	eventQueue workqueue.RateLimitingInterface
 	zkInformer zkInformer.ZookeeperClusterInformer
 }
 
 type Config struct {
-	Namespace      string
-	ClusterWide    bool
-	ServiceAccount string
-	CreateCRD      bool
-	MasterURL      string
-	Kubeconfig     string
+	ClusterWide bool
 }
 
-func New(cfg Config, client client.Client, ctx context.Context) *Controller {
+func New(cfg Config, client client.Client) *Controller {
 	return &Controller{
 		logger: logrus.WithField("pkg", "controller"),
 		Config: cfg,
-		ctx:    ctx,
 		client: client,
 	}
 }
@@ -137,10 +127,4 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 	}
 
 	return true, nil
-}
-
-func (c *Controller) initCRD() error {
-	crd := k8sutil.NewCRD(c.client.GetCRDClient(), api.ZookeeperClusterCRDName, api.ZookeeperClusterResourceKind,
-		api.ZookeeperClusterResourcePlural, "zookeeper")
-	return crd.CreateAndWait()
 }

@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// TODO: Make CRD a struct type
 type CRD interface {
 	Create() error
 	Wait() error
