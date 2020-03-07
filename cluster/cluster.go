@@ -148,7 +148,7 @@ func (c *Cluster) Sync() error {
 
 // TODO: also need to check /client/zookeeper
 func (c *Cluster) IsFinished() bool {
-	return len(c.zkStatus.GetRunningMembers()) == c.zkCR.Spec.Size
+	return c.zkStatus.GetRunningMembers().Size() == c.zkCR.Spec.Size
 }
 
 func (c *Cluster) handleUpdateEvent(event *clusterEvent) error {
@@ -194,7 +194,7 @@ func (c *Cluster) isPodPVEnabled() bool {
 	return false
 }
 
-func (c *Cluster) createPod(m *zookeeperutil.Member, allClusterMembers zookeeperutil.Members) (pod *v1.Pod, err error) {
+func (c *Cluster) createPod(m *zookeeperutil.Member, allClusterMembers *zookeeperutil.Members) (pod *v1.Pod, err error) {
 	pod = k8sutil.NewZookeeperPod(m, allClusterMembers, c.zkCR.Spec, c.zkCR.AsOwner())
 	// TODO: @MDF: add PV support
 	/*

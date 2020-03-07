@@ -155,7 +155,7 @@ func AddOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 	o.SetOwnerReferences(append(o.GetOwnerReferences(), r))
 }
 
-func NewZookeeperPod(m *zookeeperutil.Member, cluster zookeeperutil.Members, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
+func NewZookeeperPod(m *zookeeperutil.Member, cluster *zookeeperutil.Members, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
 	labels := map[string]string{
 		"app":               "zookeeper",
 		"zookeeper_node":    m.Name(),

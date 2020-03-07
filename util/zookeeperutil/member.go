@@ -39,6 +39,10 @@ func (c *clusterID) String() string {
 	return fmt.Sprintf("%s(%s)", c.clusterName, c.namespace)
 }
 
+func (c *clusterID) stringWithPointAddr() string {
+	return fmt.Sprintf("%s(%p)", c.String(), c)
+}
+
 type Member struct {
 	id      int
 	version string
@@ -75,63 +79,95 @@ func (m *Member) ID() int {
 	return m.id
 }
 
-type Members map[int]*Member
-
-func (ms Members) Add(m *Member) {
-	ms[m.ID()] = m
+type Members struct {
+	members map[int]*Member
+	*clusterID
 }
 
-func (ms Members) Remove(id int) {
-	delete(ms, id)
+func (ms *Members) GetElements() []*Member {
+	result := make([]*Member, 0, len(ms.members))
+	for _, m := range ms.members {
+		result = append(result, m)
+	}
+	return result
 }
 
-func (ms Members) Update(m Members) {
-	for id, member := range m {
-		ms[id] = member
+func (ms *Members) Add(m *Member) {
+	if m.clusterID != ms.clusterID {
+		fmt.Print(123)
+		panic(fmt.Sprintf("Add a member of %s to members of %s",
+			m.clusterID.stringWithPointAddr(), ms.clusterID.stringWithPointAddr()))
+	}
+	ms.members[m.ID()] = m
+}
+
+func (ms *Members) Remove(id int) {
+	delete(ms.members, id)
+}
+
+func (ms *Members) Update(m *Members) {
+	if m.clusterID != ms.clusterID {
+		panic(fmt.Sprintf("Can't update members of %s with members of %s",
+			ms.clusterID.stringWithPointAddr(), m.clusterID.stringWithPointAddr()))
+	}
+
+	for id, member := range m.members {
+		ms.members[id] = member
 	}
 }
 
-func (ms Members) Size() int {
-	return len(ms)
+func (ms *Members) Size() int {
+	return len(ms.members)
 }
 
-func (ms Members) Copy() Members {
-	clone := Members{}
+func (ms *Members) Copy() *Members {
+	clone := Members{
+		clusterID: ms.clusterID,
+		members:   make(map[int]*Member, len(ms.members)),
+	}
 	clone.Update(ms)
-	return clone
+	return &clone
 }
 
 // the set of all members of s1 that are not members of s2
-func (ms Members) Diff(other Members) Members {
-	diff := Members{}
-	for n, m := range ms {
-		if _, ok := other[n]; !ok {
-			diff[n] = m
+func (ms *Members) Diff(other *Members) *Members {
+	if other.clusterID != ms.clusterID {
+		panic(fmt.Sprintf("Can't get diffs between members of %s and members of %s",
+			ms.clusterID.stringWithPointAddr(), other.clusterID.stringWithPointAddr()))
+	}
+
+	diff := Members{
+		clusterID: ms.clusterID,
+		members:   make(map[int]*Member, 0),
+	}
+	for n, m := range ms.members {
+		if _, ok := other.members[n]; !ok {
+			diff.members[n] = m
 		}
 	}
-	return diff
+	return &diff
 }
 
-func (ms Members) GetMemberNames() (res []string) {
-	for _, m := range ms {
+func (ms *Members) GetMemberNames() (res []string) {
+	for _, m := range ms.members {
 		res = append(res, m.Name())
 	}
 	return res
 }
 
-func (ms Members) GetClientHosts() []string {
-	hosts := make([]string, 0)
-	for _, m := range ms {
+func (ms *Members) GetClientHosts() []string {
+	hosts := make([]string, 0, len(ms.members))
+	for _, m := range ms.members {
 		hosts = append(hosts, fmt.Sprintf("%s:2181", m.Addr()))
 	}
 	sort.Strings(hosts)
 	return hosts
 }
 
-func (ms Members) GetClusterConfig() []string {
+func (ms *Members) GetClusterConfig() []string {
 	// TODO: make clusterconfig a struct
-	clusterConfig := make([]string, 0)
-	for _, m := range ms {
+	clusterConfig := make([]string, 0, len(ms.members))
+	for _, m := range ms.members {
 		clusterConfig = append(clusterConfig, fmt.Sprintf("server.%d=%s:2888:3888:participant;0.0.0.0:2181", m.ID(), m.Addr()))
 	}
 	sort.Strings(clusterConfig)
@@ -141,9 +177,9 @@ func (ms Members) GetClusterConfig() []string {
 // TODO: Make this struct a property of zookeeper CR
 type ZKCluster struct {
 	*clusterID
-	running Members
-	unready Members
-	stopped Members
+	running *Members
+	unready *Members
+	stopped *Members
 }
 
 func NewZKCluster(namespace, cluster_name string, runningPods, unreadyPods, stoppedPods []*v1.Pod) *ZKCluster {
@@ -159,12 +195,15 @@ func NewZKCluster(namespace, cluster_name string, runningPods, unreadyPods, stop
 	}
 }
 
-func podsToMembers(id *clusterID, pods []*v1.Pod) Members {
-	members := Members{}
+func podsToMembers(id *clusterID, pods []*v1.Pod) *Members {
+	members := Members{
+		clusterID: id,
+		members:   make(map[int]*Member, len(pods)),
+	}
 	for _, pod := range pods {
 		members.Add(podToMember(id, pod))
 	}
-	return members
+	return &members
 }
 
 func podToMember(clusterID *clusterID, pod *v1.Pod) *Member {
@@ -191,7 +230,7 @@ func getZookeeperVersion(pod *v1.Pod) string {
 	return pod.Annotations["zookeeper.version"]
 }
 
-func (z *ZKCluster) RemoveMembers(size int) Members {
+func (z *ZKCluster) RemoveMembers(size int) *Members {
 	// In the future, we may support removing members while there are some stopped/unready members.
 	if size > z.running.Size() {
 		panic(fmt.Sprintf(
@@ -199,16 +238,19 @@ func (z *ZKCluster) RemoveMembers(size int) Members {
 			size, z.clusterID, z.running.Size()))
 	}
 
-	result := Members{}
+	result := Members{
+		clusterID: z.clusterID,
+		members:   make(map[int]*Member, size),
+	}
 	for i := 0; i < size; i++ {
 		result.Add(z.removeOneMember())
 	}
-	return result
+	return &result
 }
 
 func (z *ZKCluster) removeOneMember() *Member {
 	var last *Member = nil
-	for _, m := range z.running {
+	for _, m := range z.running.members {
 		if last == nil {
 			last = m
 		} else {
@@ -221,12 +263,15 @@ func (z *ZKCluster) removeOneMember() *Member {
 	return last
 }
 
-func (z *ZKCluster) AddMembers(size int) Members {
-	result := Members{}
+func (z *ZKCluster) AddMembers(size int) *Members {
+	result := Members{
+		clusterID: z.clusterID,
+		members:   make(map[int]*Member, size),
+	}
 	for i := 0; i < size; i++ {
 		result.Add(z.addOneMember())
 	}
-	return result
+	return &result
 }
 
 func (z *ZKCluster) addOneMember() *Member {
@@ -242,10 +287,10 @@ func (z *ZKCluster) nextMemberID() int {
 	// In the future, we may support removing members while there are some stopped/unready members.
 	missedID := 0
 	ids := map[int]struct{}{}
-	for _, m := range z.running {
+	for _, m := range z.running.members {
 		ids[m.ID()] = struct{}{}
 	}
-	for _, m := range z.unready {
+	for _, m := range z.unready.members {
 		ids[m.ID()] = struct{}{}
 	}
 
@@ -259,14 +304,14 @@ func (z *ZKCluster) nextMemberID() int {
 	return missedID
 }
 
-func (z *ZKCluster) GetRunningMembers() Members {
+func (z *ZKCluster) GetRunningMembers() *Members {
 	return z.running
 }
 
-func (z *ZKCluster) GetUnreadyMembers() Members {
+func (z *ZKCluster) GetUnreadyMembers() *Members {
 	return z.unready
 }
 
-func (z *ZKCluster) GetStoppedMembers() Members {
+func (z *ZKCluster) GetStoppedMembers() *Members {
 	return z.stopped
 }

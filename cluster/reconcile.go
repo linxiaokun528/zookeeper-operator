@@ -133,8 +133,8 @@ func (c *Cluster) scaleUp() error {
 	wait.Add(newMembers.Size())
 	errCh := make(chan error)
 
-	for _, member := range newMembers {
-		go func(newMember *zookeeperutil.Member, allClusterMembers zookeeperutil.Members) {
+	for _, member := range newMembers.GetElements() {
+		go func(newMember *zookeeperutil.Member, allClusterMembers *zookeeperutil.Members) {
 			defer wait.Done()
 			err := c.addOneMember(newMember, allClusterMembers)
 			if err != nil {
@@ -160,7 +160,7 @@ func (c *Cluster) scaleUp() error {
 }
 
 // The member added will be in c.zkStatus.unready
-func (c *Cluster) addOneMember(m *zookeeperutil.Member, allClusterMembers zookeeperutil.Members) error {
+func (c *Cluster) addOneMember(m *zookeeperutil.Member, allClusterMembers *zookeeperutil.Members) error {
 	_, err := c.createPod(m, allClusterMembers)
 	if err != nil {
 		return fmt.Errorf("fail to create member's pod (%s): %v", m.Name(), err)
@@ -189,7 +189,7 @@ func (c *Cluster) scaleDown() error {
 	errCh := make(chan error)
 	wait := sync.WaitGroup{}
 	wait.Add(membersToRemove.Size())
-	for _, m := range membersToRemove {
+	for _, m := range membersToRemove.GetElements() {
 		go func(member *zookeeperutil.Member) {
 			defer wait.Done()
 			err := c.removeOneMember(member)
@@ -225,7 +225,7 @@ func (c *Cluster) ReplaceStoppedMembers() error {
 	wait := sync.WaitGroup{}
 	wait.Add(c.zkStatus.GetStoppedMembers().Size())
 	errCh := make(chan error)
-	for _, dead_member := range c.zkStatus.GetStoppedMembers() {
+	for _, dead_member := range c.zkStatus.GetStoppedMembers().GetElements() {
 		go func() {
 			defer wait.Done()
 			err := c.replaceOneStoppedMember(dead_member, all)
@@ -248,7 +248,7 @@ func (c *Cluster) ReplaceStoppedMembers() error {
 	return nil
 }
 
-func (c *Cluster) replaceOneStoppedMember(toReplace *zookeeperutil.Member, cluster zookeeperutil.Members) error {
+func (c *Cluster) replaceOneStoppedMember(toReplace *zookeeperutil.Member, cluster *zookeeperutil.Members) error {
 	c.logger.Infof("replacing dead member %q", toReplace.Name)
 
 	err := c.removeOneMember(toReplace)
@@ -302,7 +302,7 @@ func (c *Cluster) needUpgrade() bool {
 }
 
 func (c *Cluster) pickOneOldMember() *zookeeperutil.Member {
-	for _, member := range c.zkStatus.GetRunningMembers() {
+	for _, member := range c.zkStatus.GetRunningMembers().GetElements() {
 		if member.Version() == c.zkCR.Spec.Version {
 			continue
 		}
