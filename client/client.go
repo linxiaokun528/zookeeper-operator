@@ -36,6 +36,7 @@ func NewClientOrDie(masterURL string, kubeconfigPath string) Client {
 	}
 }
 
+// Maybe use sigs.k8s.io/controller-runtime/pkg/manager instead
 type Client interface {
 	GetCRClient(namespace string) CRClient
 	GetCRDClient() apiextensionsclientv1.CustomResourceDefinitionInterface

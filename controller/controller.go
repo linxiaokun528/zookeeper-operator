@@ -23,7 +23,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	kwatch "k8s.io/apimachinery/pkg/watch"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/cluster"
 	zkInformer "zookeeper-operator/generated/informers/externalversions/zookeeper/v1alpha1"
@@ -31,14 +30,7 @@ import (
 
 var initRetryWaitTime = 30 * time.Second
 
-type Event struct {
-	Type   kwatch.EventType
-	Object *api.ZookeeperCluster
-}
-
 type Controller struct {
-	Config
-
 	logger *logrus.Entry
 
 	client client.Client
@@ -47,19 +39,14 @@ type Controller struct {
 	zkInformer zkInformer.ZookeeperClusterInformer
 }
 
-type Config struct {
-	ClusterWide bool
-}
-
-func New(cfg Config, client client.Client) *Controller {
+func New(client client.Client) *Controller {
 	return &Controller{
 		logger: logrus.WithField("pkg", "controller"),
-		Config: cfg,
 		client: client,
 	}
 }
 
-// ProcessNextWorkItem processes next item in queue by syncHandler
+// ProcessNextWorkItem processes next item in queue by consumer
 func (c *Controller) processNextWorkItem() bool {
 	obj, quit := c.eventQueue.Get()
 	if quit {

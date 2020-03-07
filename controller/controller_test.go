@@ -35,7 +35,7 @@ func TestHandleClusterEventUpdateFailedCluster(t *testing.T) {
 			Phase: api.ClusterPhaseFailed,
 		},
 	}
-	e := &Event{
+	e := &event{
 		Type:   watch.Modified,
 		Object: clus,
 	}
@@ -57,7 +57,7 @@ func TestHandleClusterEventDeleteFailedCluster(t *testing.T) {
 			Phase: api.ClusterPhaseFailed,
 		},
 	}
-	e := &Event{
+	e := &event{
 		Type:   watch.Deleted,
 		Object: clus,
 	}
@@ -84,7 +84,7 @@ func TestHandleClusterEventClusterwide(t *testing.T) {
 			},
 		},
 	}
-	e := &Event{
+	e := &event{
 		Type:   watch.Modified,
 		Object: clus,
 	}
@@ -101,7 +101,7 @@ func TestHandleClusterEventClusterwideIgnored(t *testing.T) {
 			Name: "test",
 		},
 	}
-	e := &Event{
+	e := &event{
 		Type:   watch.Modified,
 		Object: clus,
 	}
@@ -121,7 +121,7 @@ func TestHandleClusterEventNamespacedIgnored(t *testing.T) {
 			},
 		},
 	}
-	e := &Event{
+	e := &event{
 		Type:   watch.Modified,
 		Object: clus,
 	}

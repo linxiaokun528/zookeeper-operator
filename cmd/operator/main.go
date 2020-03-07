@@ -50,14 +50,11 @@ var (
 	kubeconfig string
 
 	listenAddr string
-
-	clusterWide bool
 )
 
 func init() {
 	flag.StringVar(&listenAddr, "listen-addr", "0.0.0.0:8080", "The address on which the HTTP server will listen to")
 	flag.BoolVar(&printVersion, "version", false, "Show version and quit")
-	flag.BoolVar(&clusterWide, "cluster-wide", false, "Enable operator to watch clusters in all namespaces")
 	flag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader elect")
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
 	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
@@ -82,11 +79,7 @@ func main() {
 	http.Handle("/metrics", promhttp.Handler())
 	go http.ListenAndServe(listenAddr, nil)
 
-	cfg := controller.Config{
-		ClusterWide: clusterWide,
-	}
-
-	zkController := controller.New(cfg, cli)
+	zkController := controller.New(cli)
 	ctx := context.TODO()
 
 	if !leaderElect {

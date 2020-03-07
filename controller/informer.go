@@ -25,7 +25,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	zkInformers "zookeeper-operator/generated/informers/externalversions"
-	"zookeeper-operator/util/k8sutil"
 )
 
 func (c *Controller) Run(ctx context.Context) {
@@ -51,9 +50,7 @@ func (c *Controller) Run(ctx context.Context) {
 		go wait.Until(c.worker, time.Second, ctx.Done())
 	}
 
-	// TODO: use workqueue to avoid blocking
 	c.zkInformer.Informer().Run(ctx.Done())
-	c.eventQueue.ShutDown()
 }
 
 func (c *Controller) worker() {
@@ -94,28 +91,10 @@ func (c *Controller) onDeleteZookeeperClus(obj interface{}) {
 }
 
 func (c *Controller) addToQueue(obj interface{}) {
-	clus := obj.(*api.ZookeeperCluster)
-	if !c.managed(clus) {
-		return
-	}
-
 	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 	if err != nil {
 		c.logger.Warningf("Couldn't get key for object %+v: %v", obj, err)
 		return
 	}
 	c.eventQueue.Add(key)
-}
-
-func (c *Controller) managed(clus *api.ZookeeperCluster) bool {
-	if v, ok := clus.Annotations[k8sutil.AnnotationScope]; ok {
-		if c.Config.ClusterWide {
-			return v == k8sutil.AnnotationClusterWide
-		}
-	} else {
-		if !c.Config.ClusterWide {
-			return true
-		}
-	}
-	return false
 }
