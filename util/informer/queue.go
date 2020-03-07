@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/util/workqueue"
+	"strings"
 	"sync"
 	"time"
 )
@@ -88,36 +89,56 @@ func (e *eventConsumingQueue) ShuttingDown() bool {
 }
 
 func (e *eventConsumingQueue) Add(resource_event *event) {
-	e.queue.Add(resource_event)
+	e.queue.Add(e.encode(resource_event))
 }
 
 func (e *eventConsumingQueue) AddAfter(resource_event *event, duration time.Duration) {
-	e.queue.AddAfter(resource_event, duration)
+	e.queue.AddAfter(e.encode(resource_event), duration)
 }
 
 func (e *eventConsumingQueue) AddRateLimited(resource_event *event) {
-	e.queue.AddRateLimited(resource_event)
+	e.queue.AddRateLimited(e.encode(resource_event))
 }
 
 func (e *eventConsumingQueue) Forget(resource_event *event) {
-	e.queue.Forget(resource_event)
+	e.queue.Forget(e.encode(resource_event))
 }
 
 func (e *eventConsumingQueue) NumRequeues(resource_event *event) int {
-	return e.queue.NumRequeues(resource_event)
+	return e.queue.NumRequeues(e.encode(resource_event))
 }
 
 func (e *eventConsumingQueue) Get() (resource_event *event, shutdown bool) {
 	item, shutdown := e.queue.Get()
-	return item.(*event), shutdown
+
+	if item == nil {
+		return nil, shutdown
+	}
+
+	return e.decode(item.(string)), shutdown
 }
 
 func (e *eventConsumingQueue) Done(resource_event *event) {
-	e.queue.Done(resource_event)
+	e.queue.Done(e.encode(resource_event))
 }
 
 func (e *eventConsumingQueue) Consume(consumerNum int) {
 	e.queue.Consume(consumerNum)
+}
+
+func (e *eventConsumingQueue) encode(resource_event *event) string {
+	return fmt.Sprintf("%s|%s", resource_event.Type, resource_event.key)
+}
+
+func (e *eventConsumingQueue) decode(key string) *event {
+	parts := strings.Split(key, "|")
+	if len(parts) != 2 {
+		panic(fmt.Sprintf("Invalid key for eventConsumingQueue: %s", key))
+	}
+	return &event{
+		Type: watch.EventType(parts[0]),
+		key:  parts[1],
+	}
 }
 
 func newEventConsumingQueue(name string, consumer Consumer) *eventConsumingQueue {

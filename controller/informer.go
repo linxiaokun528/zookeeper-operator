@@ -28,7 +28,7 @@ import (
 )
 
 func (c *Controller) Run(ctx context.Context) {
-	c.eventQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "events")
+	c.eventQueue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 	defer utilruntime.HandleCrash()
 	defer c.eventQueue.ShutDown()
 

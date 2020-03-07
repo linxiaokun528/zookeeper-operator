@@ -72,7 +72,10 @@ func (i *ResourceSyncer) Run(ctx context.Context, workerNum int) {
 		DeleteFunc: i.onDelete,
 	})
 
-	if !cache.WaitForNamedCacheSync("zookeeper", ctx.Done(), i.informer.HasSynced) {
+	if !cache.WaitForNamedCacheSync(
+		fmt.Sprintf("%s/%s-%s", i.resource.Group, i.resource.Resource, i.resource.Version),
+		ctx.Done(), i.informer.HasSynced) {
+
 		return
 	}
 
@@ -97,6 +100,11 @@ func (i *ResourceSyncer) onUpdate(oldObj, newObj interface{}) {
 
 func (i *ResourceSyncer) onDelete(obj interface{}) {
 	if i.syncer.delete != nil {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if ok {
+			obj = tombstone.Obj
+		}
+
 		i.eventQueue.Add(&event{
 			Type: watch.Deleted,
 			key:  i.objToKey(obj),
