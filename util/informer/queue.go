@@ -1,4 +1,4 @@
-package informertype
+package informer
 
 import (
 	"fmt"
@@ -73,7 +73,8 @@ func (c *ConsumingQueue) ShutDown() {
 }
 
 type eventConsumingQueue struct {
-	queue *ConsumingQueue
+	queue    *ConsumingQueue
+	consumer Consumer
 }
 
 func (e *eventConsumingQueue) Len() int {
@@ -126,6 +127,10 @@ func (e *eventConsumingQueue) Consume(consumerNum int) {
 	e.queue.Consume(consumerNum)
 }
 
+func (e *eventConsumingQueue) wrapConsumer(obj interface{}) (bool, error) {
+	return e.consumer(e.decode(obj.(string)))
+}
+
 func (e *eventConsumingQueue) encode(resource_event *event) string {
 	return fmt.Sprintf("%s|%s", resource_event.Type, resource_event.key)
 }
@@ -141,11 +146,13 @@ func (e *eventConsumingQueue) decode(key string) *event {
 	}
 }
 
-func newEventConsumingQueue(name string, consumer Consumer) *eventConsumingQueue {
-	return &eventConsumingQueue{
-		NewConsumingQueue(
-			workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), name), consumer),
-	}
+func newEventConsumingQueue(consumer Consumer) *eventConsumingQueue {
+	eventQueue := eventConsumingQueue{consumer: consumer}
+	consumingQueue := NewConsumingQueue(
+		workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()), eventQueue.wrapConsumer)
+	eventQueue.queue = consumingQueue
+
+	return &eventQueue
 }
 
 type ResourceRateLimitingAdder interface {

@@ -15,17 +15,18 @@
 package controller
 
 import (
-	"fmt"
+	"context"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/workqueue"
 	"time"
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	v1alpha1 "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/client"
+	"zookeeper-operator/cluster"
+	zkInformers "zookeeper-operator/generated/informers/externalversions"
+	"zookeeper-operator/util/informer"
 
 	"github.com/sirupsen/logrus"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/cluster"
-	zkInformer "zookeeper-operator/generated/informers/externalversions/zookeeper/v1alpha1"
 )
 
 var initRetryWaitTime = 30 * time.Second
@@ -34,9 +35,6 @@ type Controller struct {
 	logger *logrus.Entry
 
 	client client.Client
-
-	eventQueue workqueue.RateLimitingInterface
-	zkInformer zkInformer.ZookeeperClusterInformer
 }
 
 func New(client client.Client) *Controller {
@@ -46,55 +44,59 @@ func New(client client.Client) *Controller {
 	}
 }
 
-// ProcessNextWorkItem processes next item in queue by consumer
-func (c *Controller) processNextWorkItem() bool {
-	obj, quit := c.eventQueue.Get()
-	if quit {
-		return false
-	}
-	defer c.eventQueue.Done(obj)
+func (c *Controller) Run(ctx context.Context) {
+	defer utilruntime.HandleCrash()
 
-	key := obj.(string)
-	forget, err := c.syncHandler(key)
-	if err == nil {
-		if forget {
-			c.eventQueue.Forget(key)
-		}
-		return true
-	}
+	resourceSyncer := c.NewZookeeperSyncer(ctx)
+	resourceSyncer.Run(ctx, 5)
 
-	utilruntime.HandleError(fmt.Errorf("Error syncing zookeeper cluster: %v", err))
-	c.eventQueue.AddRateLimited(key)
-
-	return true
+	// TODO: add a pod informer to watch related podss
 }
 
-func (c *Controller) syncHandler(key string) (bool, error) {
-	ns, name, err := cache.SplitMetaNamespaceKey(key)
+func (c *Controller) NewZookeeperSyncer(ctx context.Context) *informer.ResourceSyncer {
+	sharedInformerFactory := zkInformers.NewSharedInformerFactory(c.client.ZookeeperInterface(), time.Minute*2)
 
-	if err != nil {
-		return false, err
-	}
-	if len(ns) == 0 || len(name) == 0 {
-		return false, fmt.Errorf("invalid zookeeper cluster key %q: either namespace or name is missing", key)
-	}
-	sharedCluster, err := c.zkInformer.Lister().ZookeeperClusters(ns).Get(name)
-	if sharedCluster.DeletionTimestamp != nil {
-		return true, nil
-	}
+	zkInformer := sharedInformerFactory.Zookeeper().V1alpha1().ZookeeperClusters().Informer()
+	groupVersionResource := v1alpha1.SchemeGroupVersion.WithResource("zookeeperclusters")
 
+	resourceSyncer := informer.NewResourceSyncer(zkInformer, &groupVersionResource, c.logger,
+		func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) informer.Syncer {
+			zkSyncer := ZookeeperSyncer{
+				adder:  adder,
+				lister: lister,
+				client: c.client,
+				logger: c.logger,
+			}
+
+			return informer.Syncer{
+				Sync: zkSyncer.sync,
+			}
+		})
+
+	return resourceSyncer
+}
+
+type ZookeeperSyncer struct {
+	adder  informer.ResourceRateLimitingAdder
+	lister cache.GenericLister
+	client client.Client
+	logger *logrus.Entry
+}
+
+func (z *ZookeeperSyncer) sync(obj interface{}) (bool, error) {
+	sharedCluster := obj.(*api.ZookeeperCluster)
 	sharedCluster = sharedCluster.DeepCopy()
-	zkCluster := cluster.New(c.client.GetCRClient(sharedCluster.Namespace), sharedCluster)
+	zkCluster := cluster.New(z.client.GetCRClient(sharedCluster.Namespace), sharedCluster)
 	defer func() {
 		if !zkCluster.IsFinished() {
-			c.eventQueue.AddAfter(key, 30*time.Second)
+			z.adder.AddAfter(sharedCluster, 30*time.Second)
 		}
 	}()
 
 	start := time.Now()
 
 	if sharedCluster.Status.Phase == api.ClusterPhaseNone {
-		err = zkCluster.Create()
+		err := zkCluster.Create()
 		if err != nil {
 			return false, err
 		}
@@ -107,7 +109,7 @@ func (c *Controller) syncHandler(key string) (bool, error) {
 		cluster.ReconcileFailed.WithLabelValues(rerr.Error()).Inc()
 		if cluster.IsFatalError(rerr) {
 			sharedCluster.Status.SetReason(rerr.Error())
-			c.logger.Errorf("cluster failed: %v", rerr)
+			z.logger.Errorf("cluster failed: %v", rerr)
 			zkCluster.ReportFailedStatus()
 		}
 		return false, rerr

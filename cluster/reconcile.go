@@ -100,7 +100,7 @@ func (c *Cluster) needReconfig() (bool, error) {
 }
 
 func (c *Cluster) reconfig(hosts []string, desiredConfig []string) error {
-	c.logger.Infoln("Reconfiguring ZK %v", c.zkCR.Name)
+	c.logger.Infoln("Reconfiguring zookeeper cluster", c.zkCR.Name)
 	err := zookeeperutil.ReconfigureCluster(hosts, desiredConfig)
 	if err != nil {
 		c.logger.Infoln("Reconfigure error")

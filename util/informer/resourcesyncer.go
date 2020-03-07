@@ -1,4 +1,4 @@
-package informertype
+package informer
 
 import (
 	"context"
@@ -15,8 +15,8 @@ import (
 type syncFunc func(obj interface{}) (bool, error)
 
 type Syncer struct {
-	synce  syncFunc
-	delete syncFunc
+	Sync   syncFunc
+	Delete syncFunc
 }
 
 type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) Syncer
@@ -43,7 +43,7 @@ func NewResourceSyncer(informer cache.SharedIndexInformer, resource *schema.Grou
 		lister:   lister,
 	}
 
-	eventQueue := newEventConsumingQueue("events", result.consume)
+	eventQueue := newEventConsumingQueue(result.consume)
 	adder := resourceRateLimitingAdder{
 		eventQueue: eventQueue,
 		keyGetter:  result.objToKey,
@@ -72,19 +72,20 @@ func (i *ResourceSyncer) Run(ctx context.Context, workerNum int) {
 		DeleteFunc: i.onDelete,
 	})
 
+	go i.informer.Run(ctx.Done())
+
 	if !cache.WaitForNamedCacheSync(
 		fmt.Sprintf("%s/%s-%s", i.resource.Group, i.resource.Resource, i.resource.Version),
 		ctx.Done(), i.informer.HasSynced) {
-
 		return
 	}
-
 	i.eventQueue.Consume(workerNum)
+	<-ctx.Done()
 
-	i.informer.Run(ctx.Done())
 }
 
 func (i *ResourceSyncer) onAdd(obj interface{}) {
+	i.logger.Info(fmt.Sprintf("Receive a creation event for %s", i.objToKey(obj)))
 	i.eventQueue.Add(&event{
 		Type: watch.Added,
 		key:  i.objToKey(obj),
@@ -92,6 +93,7 @@ func (i *ResourceSyncer) onAdd(obj interface{}) {
 }
 
 func (i *ResourceSyncer) onUpdate(oldObj, newObj interface{}) {
+	i.logger.Info(fmt.Sprintf("Receive a update event for %s", i.objToKey(newObj)))
 	i.eventQueue.Add(&event{
 		Type: watch.Modified,
 		key:  i.objToKey(newObj),
@@ -99,12 +101,13 @@ func (i *ResourceSyncer) onUpdate(oldObj, newObj interface{}) {
 }
 
 func (i *ResourceSyncer) onDelete(obj interface{}) {
-	if i.syncer.delete != nil {
-		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-		if ok {
-			obj = tombstone.Obj
-		}
+	tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+	if ok {
+		obj = tombstone.Obj
+	}
+	i.logger.Info(fmt.Sprintf("Receive a deletion event for %s", i.objToKey(obj)))
 
+	if i.syncer.Delete != nil {
 		i.eventQueue.Add(&event{
 			Type: watch.Deleted,
 			key:  i.objToKey(obj),
@@ -113,9 +116,9 @@ func (i *ResourceSyncer) onDelete(obj interface{}) {
 }
 
 func (i *ResourceSyncer) consume(item interface{}) (bool, error) {
-	event := item.(event)
+	event := item.(*event)
 	if event.Type == watch.Deleted {
-		return i.syncer.delete(event.key)
+		return i.syncer.Delete(event.key)
 	} else {
 		ns, name, err := cache.SplitMetaNamespaceKey(event.key)
 
@@ -134,6 +137,6 @@ func (i *ResourceSyncer) consume(item interface{}) (bool, error) {
 			return true, nil
 		}
 
-		return i.syncer.synce(obj.DeepCopyObject())
+		return i.syncer.Sync(obj.DeepCopyObject())
 	}
 }
