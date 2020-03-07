@@ -50,7 +50,7 @@ func (c *Controller) Run(ctx context.Context) {
 	resourceSyncer := c.NewZookeeperSyncer(ctx)
 	resourceSyncer.Run(ctx, 5)
 
-	// TODO: add a pod informer to watch related podss
+	// TODO: add a pod informer to watch related pods
 }
 
 func (c *Controller) NewZookeeperSyncer(ctx context.Context) *informer.ResourceSyncer {

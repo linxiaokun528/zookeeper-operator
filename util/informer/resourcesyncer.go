@@ -87,7 +87,7 @@ func (i *ResourceSyncer) Run(ctx context.Context, workerNum int) {
 func (i *ResourceSyncer) onAdd(obj interface{}) {
 	i.logger.Info(fmt.Sprintf("Receive a creation event for %s", i.objToKey(obj)))
 	i.eventQueue.Add(&event{
-		Type: watch.Added,
+		Type: watch.Modified,
 		key:  i.objToKey(obj),
 	})
 }
