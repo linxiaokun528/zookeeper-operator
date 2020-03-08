@@ -61,7 +61,7 @@ type ClusterStatus struct {
 	ClientPort int `json:"clientPort,omitempty"`
 
 	// Members are the zookeeper members in the cluster
-	Members MembersStatus `json:"members"`
+	Members *ZKCluster `json:"members"`
 	// CurrentVersion is the current cluster version
 	CurrentVersion string `json:"currentVersion"`
 	// TargetVersion is the version the cluster upgrading to.
@@ -87,14 +87,6 @@ type ClusterCondition struct {
 	Reason string `json:"reason,omitempty"`
 	// A human readable message indicating details about the transition.
 	Message string `json:"message,omitempty"`
-}
-
-type MembersStatus struct {
-	// Ready are the zookeeper members that are ready to serve requests
-	// The member names are the same as the zookeeper pod names
-	Ready []string `json:"ready,omitempty"`
-	// Unready are the zookeeper members not ready to serve requests
-	Unready []string `json:"unready,omitempty"`
 }
 
 func (cs *ClusterStatus) IsFailed() bool {

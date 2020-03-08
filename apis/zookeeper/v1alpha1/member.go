@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package zookeeperutil
+package v1alpha1
 
 import (
+	"encoding/json"
 	"fmt"
 	v1 "k8s.io/api/core/v1"
 	"sort"
@@ -79,6 +80,35 @@ func (m *Member) ID() int {
 	return m.id
 }
 
+func (m *Member) setClusterID(id *clusterID) {
+	m.clusterID = id
+}
+
+type memberMarshal struct {
+	Name    string
+	Version string
+}
+
+func (m *Member) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&memberMarshal{
+		Name:    m.Name(),
+		Version: m.Version(),
+	})
+}
+
+func (m *Member) UnmarshalJSON(b []byte) error {
+	mMarshal := memberMarshal{}
+
+	err := json.Unmarshal(b, &mMarshal)
+	if err != nil {
+		return err
+	}
+	m.id = getIdFromName(mMarshal.Name)
+	m.version = mMarshal.Version
+
+	return nil
+}
+
 type Members struct {
 	members map[int]*Member
 	*clusterID
@@ -89,6 +119,7 @@ func (ms *Members) GetElements() []*Member {
 	for _, m := range ms.members {
 		result = append(result, m)
 	}
+
 	return result
 }
 
@@ -174,12 +205,46 @@ func (ms *Members) GetClusterConfig() []string {
 	return clusterConfig
 }
 
-// TODO: Make this struct a property of zookeeper CR
+// Do the custom marshal/unmarshal thing to make sure that we have a readable status of zookeeper cluster
+func (ms *Members) MarshalJSON() ([]byte, error) {
+	keys := make([]int, 0, len(ms.members))
+	for k := range ms.members {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+
+	members := make([]*Member, 0, len(ms.members))
+	for _, k := range keys {
+		members = append(members, ms.members[k])
+	}
+	return json.Marshal(&members)
+}
+
+func (ms *Members) UnmarshalJSON(b []byte) error {
+	members := []*Member{}
+	err := json.Unmarshal(b, &members)
+	if err != nil {
+		return err
+	}
+	ms.members = make(map[int]*Member, len(members))
+	for _, member := range members {
+		ms.members[member.id] = member
+	}
+	return nil
+}
+
+func (ms *Members) setClusterID(id *clusterID) {
+	ms.clusterID = id
+	for _, m := range ms.members {
+		m.setClusterID(id)
+	}
+}
+
 type ZKCluster struct {
-	*clusterID
-	running *Members
-	unready *Members
-	stopped *Members
+	*clusterID `json:omit`
+	Running    *Members `json:"running"`
+	Unready    *Members `json:"unready"`
+	Stopped    *Members `json:"stopped"`
 }
 
 func NewZKCluster(namespace, cluster_name string, runningPods, unreadyPods, stoppedPods []*v1.Pod) *ZKCluster {
@@ -189,9 +254,9 @@ func NewZKCluster(namespace, cluster_name string, runningPods, unreadyPods, stop
 	}
 	return &ZKCluster{
 		clusterID: id,
-		running:   podsToMembers(id, runningPods),
-		unready:   podsToMembers(id, unreadyPods),
-		stopped:   podsToMembers(id, stoppedPods),
+		Running:   podsToMembers(id, runningPods),
+		Unready:   podsToMembers(id, unreadyPods),
+		Stopped:   podsToMembers(id, stoppedPods),
 	}
 }
 
@@ -206,20 +271,24 @@ func podsToMembers(id *clusterID, pods []*v1.Pod) *Members {
 	return &members
 }
 
-func podToMember(clusterID *clusterID, pod *v1.Pod) *Member {
-	i := strings.LastIndex(pod.Name, "-")
+func getIdFromName(name string) int {
+	i := strings.LastIndex(name, "-")
 	if i == -1 {
-		panic(fmt.Sprintf("unexpected member name: %s", pod.Name))
+		panic(fmt.Sprintf("unexpected member name: %s", name))
 	}
 
-	id, err := strconv.Atoi(pod.Name[i+1:])
+	id, err := strconv.Atoi(name[i+1:])
 
 	if err != nil {
-		panic(fmt.Sprintf("unexpected member name: %s", pod.Name))
+		panic(fmt.Sprintf("unexpected member name: %s", name))
 	}
 
+	return id
+}
+
+func podToMember(clusterID *clusterID, pod *v1.Pod) *Member {
 	return &Member{
-		id:        id,
+		id:        getIdFromName(pod.Name),
 		clusterID: clusterID,
 		version:   getZookeeperVersion(pod),
 	}
@@ -232,10 +301,10 @@ func getZookeeperVersion(pod *v1.Pod) string {
 
 func (z *ZKCluster) RemoveMembers(size int) *Members {
 	// In the future, we may support removing members while there are some stopped/unready members.
-	if size > z.running.Size() {
+	if size > z.Running.Size() {
 		panic(fmt.Sprintf(
 			"Receive a request of deleting %d member(s), but ZkCluster %s has only %d member(s) running.",
-			size, z.clusterID, z.running.Size()))
+			size, z.clusterID, z.Running.Size()))
 	}
 
 	result := Members{
@@ -250,7 +319,7 @@ func (z *ZKCluster) RemoveMembers(size int) *Members {
 
 func (z *ZKCluster) removeOneMember() *Member {
 	var last *Member = nil
-	for _, m := range z.running.members {
+	for _, m := range z.Running.members {
 		if last == nil {
 			last = m
 		} else {
@@ -259,7 +328,7 @@ func (z *ZKCluster) removeOneMember() *Member {
 			}
 		}
 	}
-	z.running.Remove(last.ID())
+	z.Running.Remove(last.ID())
 	return last
 }
 
@@ -279,7 +348,7 @@ func (z *ZKCluster) addOneMember() *Member {
 		id:        z.nextMemberID(),
 		clusterID: z.clusterID,
 	}
-	z.unready.Add(&m)
+	z.Unready.Add(&m)
 	return &m
 }
 
@@ -287,10 +356,10 @@ func (z *ZKCluster) nextMemberID() int {
 	// In the future, we may support removing members while there are some stopped/unready members.
 	missedID := 0
 	ids := map[int]struct{}{}
-	for _, m := range z.running.members {
+	for _, m := range z.Running.members {
 		ids[m.ID()] = struct{}{}
 	}
-	for _, m := range z.unready.members {
+	for _, m := range z.Unready.members {
 		ids[m.ID()] = struct{}{}
 	}
 
@@ -304,14 +373,9 @@ func (z *ZKCluster) nextMemberID() int {
 	return missedID
 }
 
-func (z *ZKCluster) GetRunningMembers() *Members {
-	return z.running
-}
-
-func (z *ZKCluster) GetUnreadyMembers() *Members {
-	return z.unready
-}
-
-func (z *ZKCluster) GetStoppedMembers() *Members {
-	return z.stopped
+func (z *ZKCluster) setClusterID(id *clusterID) {
+	z.clusterID = id
+	z.Running.setClusterID(id)
+	z.Unready.setClusterID(id)
+	z.Stopped.setClusterID(id)
 }

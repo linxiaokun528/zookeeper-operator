@@ -21,9 +21,6 @@ import (
 	"strings"
 	"time"
 
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/util/zookeeperutil"
-
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
 	"k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // for gcp auth
+	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 )
 
 const (
@@ -155,7 +153,7 @@ func AddOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 	o.SetOwnerReferences(append(o.GetOwnerReferences(), r))
 }
 
-func NewZookeeperPod(m *zookeeperutil.Member, cluster *zookeeperutil.Members, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
+func NewZookeeperPod(m *api.Member, cluster *api.Members, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
 	labels := map[string]string{
 		"app":               "zookeeper",
 		"zookeeper_node":    m.Name(),

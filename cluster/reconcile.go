@@ -37,7 +37,7 @@ func (c *Cluster) Reconcile() error {
 
 	defer func() {
 		// TODO: it's not correct
-		c.zkCR.Status.Size = c.zkStatus.GetRunningMembers().Size()
+		c.zkCR.Status.Size = c.zkCR.Status.Members.Running.Size()
 	}()
 
 	err := c.configCluster()
@@ -46,7 +46,7 @@ func (c *Cluster) Reconcile() error {
 	}
 
 	// If not enough are running or membership size != spec size then maybe resize
-	if c.zkStatus.GetRunningMembers().Size() != c.zkCR.Spec.Size {
+	if c.zkCR.Status.Members.Running.Size() != c.zkCR.Spec.Size {
 		return c.resize()
 	}
 	c.zkCR.Status.ClearCondition(api.ClusterConditionScaling)
@@ -73,24 +73,24 @@ func (c *Cluster) configCluster() error {
 	}
 
 	if need_reconfig {
-		return c.reconfig(c.zkStatus.GetRunningMembers().GetClientHosts(),
-			c.zkStatus.GetRunningMembers().GetClusterConfig())
+		return c.reconfig(c.zkCR.Status.Members.Running.GetClientHosts(),
+			c.zkCR.Status.Members.Running.GetClusterConfig())
 	}
 
 	return nil
 }
 
 func (c *Cluster) needReconfig() (bool, error) {
-	if c.zkStatus.GetRunningMembers().Size() == 0 {
+	if c.zkCR.Status.Members.Running.Size() == 0 {
 		return false, nil
 	}
-	actualConfig, err := zookeeperutil.GetClusterConfig(c.zkStatus.GetRunningMembers().GetClientHosts())
+	actualConfig, err := zookeeperutil.GetClusterConfig(c.zkCR.Status.Members.Running.GetClientHosts())
 	if err != nil {
 		c.logger.Info("Failed to get configure from zookeeper: %v",
-			c.zkStatus.GetRunningMembers().GetClientHosts())
+			c.zkCR.Status.Members.Running.GetClientHosts())
 		return false, err
 	}
-	expectedConfig := c.zkStatus.GetRunningMembers().GetClusterConfig()
+	expectedConfig := c.zkCR.Status.Members.Running.GetClusterConfig()
 
 	sort.Strings(actualConfig)
 	sort.Strings(expectedConfig)
@@ -111,11 +111,11 @@ func (c *Cluster) reconfig(hosts []string, desiredConfig []string) error {
 }
 
 func (c *Cluster) resize() error {
-	if c.zkStatus.GetRunningMembers().Size() == c.zkCR.Spec.Size {
+	if c.zkCR.Status.Members.Running.Size() == c.zkCR.Spec.Size {
 		return nil
 	}
 
-	if c.zkStatus.GetRunningMembers().Size() < c.zkCR.Spec.Size {
+	if c.zkCR.Status.Members.Running.Size() < c.zkCR.Spec.Size {
 		return c.scaleUp()
 	}
 
@@ -123,10 +123,10 @@ func (c *Cluster) resize() error {
 }
 
 func (c *Cluster) scaleUp() error {
-	c.zkCR.Status.SetScalingUpCondition(c.zkStatus.GetRunningMembers().Size(), c.zkCR.Spec.Size)
-	diff := c.zkCR.Spec.Size - c.zkStatus.GetRunningMembers().Size()
-	newMembers := c.zkStatus.AddMembers(diff)
-	all := c.zkStatus.GetRunningMembers().Copy()
+	c.zkCR.Status.SetScalingUpCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
+	diff := c.zkCR.Spec.Size - c.zkCR.Status.Members.Running.Size()
+	newMembers := c.zkCR.Status.Members.AddMembers(diff)
+	all := c.zkCR.Status.Members.Running.Copy()
 	all.Update(newMembers)
 
 	wait := sync.WaitGroup{}
@@ -134,13 +134,13 @@ func (c *Cluster) scaleUp() error {
 	errCh := make(chan error)
 
 	for _, member := range newMembers.GetElements() {
-		go func(newMember *zookeeperutil.Member, allClusterMembers *zookeeperutil.Members) {
+		go func(newMember *api.Member, allClusterMembers *api.Members) {
 			defer wait.Done()
 			err := c.addOneMember(newMember, allClusterMembers)
 			if err != nil {
 				errCh <- err
 				c.locker.Lock()
-				c.zkStatus.GetUnreadyMembers().Remove(member.ID())
+				c.zkCR.Status.Members.Unready.Remove(member.ID())
 				c.locker.Unlock()
 			}
 		}(member, all)
@@ -159,8 +159,8 @@ func (c *Cluster) scaleUp() error {
 	return nil
 }
 
-// The member added will be in c.zkStatus.unready
-func (c *Cluster) addOneMember(m *zookeeperutil.Member, allClusterMembers *zookeeperutil.Members) error {
+// The member added will be in c.zkCR.Status.Members.unready
+func (c *Cluster) addOneMember(m *api.Member, allClusterMembers *api.Members) error {
 	_, err := c.createPod(m, allClusterMembers)
 	if err != nil {
 		return fmt.Errorf("fail to create member's pod (%s): %v", m.Name(), err)
@@ -175,14 +175,14 @@ func (c *Cluster) addOneMember(m *zookeeperutil.Member, allClusterMembers *zooke
 }
 
 func (c *Cluster) scaleDown() error {
-	c.zkCR.Status.SetScalingDownCondition(c.zkStatus.GetRunningMembers().Size(), c.zkCR.Spec.Size)
-	diff := c.zkStatus.GetRunningMembers().Size() - c.zkCR.Spec.Size
+	c.zkCR.Status.SetScalingDownCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
+	diff := c.zkCR.Status.Members.Running.Size() - c.zkCR.Spec.Size
 
-	membersToRemove := c.zkStatus.RemoveMembers(diff)
+	membersToRemove := c.zkCR.Status.Members.RemoveMembers(diff)
 
-	err := c.reconfig(c.zkStatus.GetRunningMembers().GetClientHosts(), c.zkStatus.GetRunningMembers().GetClusterConfig())
+	err := c.reconfig(c.zkCR.Status.Members.Running.GetClientHosts(), c.zkCR.Status.Members.Running.GetClusterConfig())
 	if err != nil {
-		c.zkStatus.GetRunningMembers().Update(membersToRemove)
+		c.zkCR.Status.Members.Running.Update(membersToRemove)
 		return err
 	}
 
@@ -190,13 +190,13 @@ func (c *Cluster) scaleDown() error {
 	wait := sync.WaitGroup{}
 	wait.Add(membersToRemove.Size())
 	for _, m := range membersToRemove.GetElements() {
-		go func(member *zookeeperutil.Member) {
+		go func(member *api.Member) {
 			defer wait.Done()
 			err := c.removeOneMember(member)
 			if err != nil {
 				errCh <- err
 				c.locker.Lock()
-				c.zkStatus.GetRunningMembers().Add(member)
+				c.zkCR.Status.Members.Running.Add(member)
 				c.locker.Unlock()
 			}
 		}(m)
@@ -216,16 +216,16 @@ func (c *Cluster) scaleDown() error {
 }
 
 func (c *Cluster) ReplaceStoppedMembers() error {
-	c.logger.Infof("Some members are stopped: (%v)", c.zkStatus.GetStoppedMembers().GetMemberNames())
+	c.logger.Infof("Some members are stopped: (%v)", c.zkCR.Status.Members.Stopped.GetMemberNames())
 
-	all := c.zkStatus.GetRunningMembers().Copy()
-	all.Update(c.zkStatus.GetStoppedMembers())
+	all := c.zkCR.Status.Members.Running.Copy()
+	all.Update(c.zkCR.Status.Members.Stopped)
 
 	// TODO: we have a pattern: wait-for-error. Need to refactor this.
 	wait := sync.WaitGroup{}
-	wait.Add(c.zkStatus.GetStoppedMembers().Size())
+	wait.Add(c.zkCR.Status.Members.Stopped.Size())
 	errCh := make(chan error)
-	for _, dead_member := range c.zkStatus.GetStoppedMembers().GetElements() {
+	for _, dead_member := range c.zkCR.Status.Members.Stopped.GetElements() {
 		go func() {
 			defer wait.Done()
 			err := c.replaceOneStoppedMember(dead_member, all)
@@ -248,7 +248,7 @@ func (c *Cluster) ReplaceStoppedMembers() error {
 	return nil
 }
 
-func (c *Cluster) replaceOneStoppedMember(toReplace *zookeeperutil.Member, cluster *zookeeperutil.Members) error {
+func (c *Cluster) replaceOneStoppedMember(toReplace *api.Member, cluster *api.Members) error {
 	c.logger.Infof("replacing dead member %q", toReplace.Name)
 
 	err := c.removeOneMember(toReplace)
@@ -256,14 +256,14 @@ func (c *Cluster) replaceOneStoppedMember(toReplace *zookeeperutil.Member, clust
 		return err
 	}
 	c.locker.Lock()
-	c.zkStatus.GetStoppedMembers().Remove(toReplace.ID())
+	c.zkCR.Status.Members.Stopped.Remove(toReplace.ID())
 	c.locker.Unlock()
 
 	err = c.addOneMember(toReplace, cluster)
 	if err != nil {
 		return err
 	}
-	c.zkStatus.GetUnreadyMembers().Add(toReplace)
+	c.zkCR.Status.Members.Unready.Add(toReplace)
 
 	_, err = c.client.Event().Create(k8sutil.ReplacingDeadMemberEvent(toReplace.Name(), c.zkCR))
 	if err != nil {
@@ -274,7 +274,7 @@ func (c *Cluster) replaceOneStoppedMember(toReplace *zookeeperutil.Member, clust
 }
 
 // Remember to reconfig the zookeeper zkCR before invoking this function
-func (c *Cluster) removeOneMember(m *zookeeperutil.Member) (err error) {
+func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 	if err := c.removePod(m.Name()); err != nil {
 		return err
 	}
@@ -298,11 +298,11 @@ func (c *Cluster) removeOneMember(m *zookeeperutil.Member) (err error) {
 }
 
 func (c *Cluster) needUpgrade() bool {
-	return c.zkStatus.GetRunningMembers().Size() == c.zkCR.Spec.Size && c.pickOneOldMember() != nil
+	return c.zkCR.Status.Members.Running.Size() == c.zkCR.Spec.Size && c.pickOneOldMember() != nil
 }
 
-func (c *Cluster) pickOneOldMember() *zookeeperutil.Member {
-	for _, member := range c.zkStatus.GetRunningMembers().GetElements() {
+func (c *Cluster) pickOneOldMember() *api.Member {
+	for _, member := range c.zkCR.Status.Members.Running.GetElements() {
 		if member.Version() == c.zkCR.Spec.Version {
 			continue
 		}

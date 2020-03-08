@@ -17,10 +17,13 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"math"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,12 +32,6 @@ import (
 	zklisters "zookeeper-operator/generated/listers/zookeeper/v1alpha1"
 	"zookeeper-operator/util/k8sutil"
 	"zookeeper-operator/util/retryutil"
-	"zookeeper-operator/util/zookeeperutil"
-
-	"github.com/sirupsen/logrus"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
 var (
@@ -63,8 +60,7 @@ type Cluster struct {
 	logger *logrus.Entry
 	client client.CRClient
 
-	zkCR     *api.ZookeeperCluster
-	zkStatus *zookeeperutil.ZKCluster
+	zkCR *api.ZookeeperCluster
 
 	locker sync.Locker
 }
@@ -84,6 +80,11 @@ func New(client client.CRClient, zkCR *api.ZookeeperCluster) *Cluster {
 func (c *Cluster) Create() error {
 	c.zkCR.Status.SetPhase(api.ClusterPhaseCreating)
 	c.zkCR.Status.StartTime = metav1.Now()
+	empty := []*v1.Pod{}
+	c.zkCR.Status.Members = api.NewZKCluster(c.zkCR.Namespace, c.zkCR.Name, empty, empty, empty)
+
+	bytes, _ := json.Marshal(c.zkCR.Status.Members)
+	fmt.Print(string(bytes))
 
 	if err := c.setupServices(); err != nil {
 		return fmt.Errorf("zkCR create: failed to setup service: %v", err)
@@ -103,24 +104,24 @@ func (c *Cluster) Sync() error {
 		return err
 	}
 
-	if c.zkStatus.GetRunningMembers().Size() == 0 && c.zkStatus.GetUnreadyMembers().Size() == 0 &&
-		c.zkStatus.GetStoppedMembers().Size() == 0 {
+	if c.zkCR.Status.Members.Running.Size() == 0 && c.zkCR.Status.Members.Unready.Size() == 0 &&
+		c.zkCR.Status.Members.Stopped.Size() == 0 {
 		// Don't start seed member in create. If we do that, and then delete the seed pod, we will
 		// never generate the seed member again.
 		return c.scaleUp()
 	}
 
-	if c.zkStatus.GetUnreadyMembers().Size() > 0 {
+	if c.zkCR.Status.Members.Unready.Size() > 0 {
 		// Pod startup might take long, e.g. pulling image. It would deterministically become ready or succeeded/failed later.
 		c.logger.Infof("skip reconciliation: running (%v), unready (%v)",
-			c.zkStatus.GetRunningMembers(), c.zkStatus.GetUnreadyMembers())
+			c.zkCR.Status.Members.Running, c.zkCR.Status.Members.Unready)
 		ReconcileFailed.WithLabelValues("not all pods are ready").Inc()
 		return nil
 	}
 
-	if c.zkStatus.GetStoppedMembers().Size() > 0 {
+	if c.zkCR.Status.Members.Stopped.Size() > 0 {
 		c.ReplaceStoppedMembers()
-		return fmt.Errorf("Some members are stopped: (%v)", c.zkStatus.GetStoppedMembers().GetMemberNames())
+		return fmt.Errorf("Some members are stopped: (%v)", c.zkCR.Status.Members.Stopped.GetMemberNames())
 	}
 
 	rerr := c.Reconcile()
@@ -128,7 +129,6 @@ func (c *Cluster) Sync() error {
 		c.logger.Errorf("failed to reconcile: %v", rerr)
 		return rerr
 	}
-	c.UpdateMemberStatus()
 
 	if reflect.DeepEqual(original_cluster, c.zkCR) {
 		return nil
@@ -140,6 +140,7 @@ func (c *Cluster) Sync() error {
 		c.logger.Info(string(data))
 	}
 
+	// TODO: move the following codes to zookeeperSyncer.sync, and use defer
 	if err := c.UpdateCR(); err != nil {
 		c.logger.Warningf("	Update CR status failed: %v", err)
 	}
@@ -148,7 +149,7 @@ func (c *Cluster) Sync() error {
 
 // TODO: also need to check /client/zookeeper
 func (c *Cluster) IsFinished() bool {
-	return c.zkStatus.GetRunningMembers().Size() == c.zkCR.Spec.Size
+	return c.zkCR.Status.Members.Running.Size() == c.zkCR.Spec.Size
 }
 
 func (c *Cluster) handleUpdateEvent(event *clusterEvent) error {
@@ -194,7 +195,7 @@ func (c *Cluster) isPodPVEnabled() bool {
 	return false
 }
 
-func (c *Cluster) createPod(m *zookeeperutil.Member, allClusterMembers *zookeeperutil.Members) (pod *v1.Pod, err error) {
+func (c *Cluster) createPod(m *api.Member, allClusterMembers *api.Members) (pod *v1.Pod, err error) {
 	pod = k8sutil.NewZookeeperPod(m, allClusterMembers, c.zkCR.Spec, c.zkCR.AsOwner())
 	// TODO: @MDF: add PV support
 	/*
@@ -258,7 +259,7 @@ func (c *Cluster) initCurrentStatus() (err error) {
 	}
 	running_pods, unready_pods, stopped_pods := k8sutil.GetPodsSeparatedByStatus(pods)
 
-	c.zkStatus = zookeeperutil.NewZKCluster(c.zkCR.Namespace, c.zkCR.Name, running_pods, unready_pods, stopped_pods)
+	c.zkCR.Status.Members = api.NewZKCluster(c.zkCR.Namespace, c.zkCR.Name, running_pods, unready_pods, stopped_pods)
 
 	return nil
 }
@@ -271,17 +272,6 @@ func (c *Cluster) createService(service *v1.Service) error {
 		return err
 	}
 	return nil
-}
-
-// TODO: We may need to decide what kinds of information we need.
-// If the ready members means configured members, we may need to add a configuredMembers in zookeeperutil.ZKCluster
-func (c *Cluster) UpdateMemberStatus() {
-	c.zkCR.Status.Members.Ready = c.zkStatus.GetRunningMembers().GetMemberNames()
-	c.zkCR.Status.Members.Unready = c.zkStatus.GetUnreadyMembers().GetMemberNames()
-
-	// If we don't sort here, the different order of ready/unready may cause a update on CR.
-	sort.Strings(c.zkCR.Status.Members.Ready)
-	sort.Strings(c.zkCR.Status.Members.Unready)
 }
 
 func (c *Cluster) UpdateCR() error {

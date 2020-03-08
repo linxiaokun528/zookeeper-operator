@@ -47,13 +47,13 @@ func New(client client.Client) *Controller {
 func (c *Controller) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
-	resourceSyncer := c.NewZookeeperSyncer(ctx)
+	resourceSyncer := c.newZookeeperSyncer()
 	resourceSyncer.Run(ctx, 5)
 
 	// TODO: add a pod informer to watch related pods
 }
 
-func (c *Controller) NewZookeeperSyncer(ctx context.Context) *informer.ResourceSyncer {
+func (c *Controller) newZookeeperSyncer() *informer.ResourceSyncer {
 	sharedInformerFactory := zkInformers.NewSharedInformerFactory(c.client.ZookeeperInterface(), time.Minute*2)
 
 	zkInformer := sharedInformerFactory.Zookeeper().V1alpha1().ZookeeperClusters().Informer()
@@ -61,7 +61,7 @@ func (c *Controller) NewZookeeperSyncer(ctx context.Context) *informer.ResourceS
 
 	resourceSyncer := informer.NewResourceSyncer(zkInformer, &groupVersionResource, c.logger,
 		func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) informer.Syncer {
-			zkSyncer := ZookeeperSyncer{
+			zkSyncer := zookeeperSyncer{
 				adder:  adder,
 				lister: lister,
 				client: c.client,
@@ -76,14 +76,14 @@ func (c *Controller) NewZookeeperSyncer(ctx context.Context) *informer.ResourceS
 	return resourceSyncer
 }
 
-type ZookeeperSyncer struct {
+type zookeeperSyncer struct {
 	adder  informer.ResourceRateLimitingAdder
 	lister cache.GenericLister
 	client client.Client
 	logger *logrus.Entry
 }
 
-func (z *ZookeeperSyncer) sync(obj interface{}) (bool, error) {
+func (z *zookeeperSyncer) sync(obj interface{}) (bool, error) {
 	sharedCluster := obj.(*api.ZookeeperCluster)
 	sharedCluster = sharedCluster.DeepCopy()
 	zkCluster := cluster.New(z.client.GetCRClient(sharedCluster.Namespace), sharedCluster)

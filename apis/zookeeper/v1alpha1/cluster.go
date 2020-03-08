@@ -15,6 +15,7 @@
 package v1alpha1
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -58,6 +59,20 @@ func (c *ZookeeperCluster) AsOwner() metav1.OwnerReference {
 		UID:        c.UID,
 		Controller: &trueVar,
 	}
+}
+
+func (c *ZookeeperCluster) UnmarshalJSON(b []byte) error {
+	type tmpType ZookeeperCluster
+	err := json.Unmarshal(b, (*tmpType)(c))
+	if err != nil {
+		return err
+	}
+	if c.Status.Members != nil {
+		clusterID := clusterID{namespace: c.Namespace, clusterName: c.Name}
+		c.Status.Members.setClusterID(&clusterID)
+	}
+
+	return nil
 }
 
 type JVMPolicy struct {
