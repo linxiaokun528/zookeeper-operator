@@ -242,9 +242,9 @@ func (ms *Members) setClusterID(id *clusterID) {
 
 type ZKCluster struct {
 	*clusterID `json:omit`
-	Running    *Members `json:"running"`
-	Unready    *Members `json:"unready"`
-	Stopped    *Members `json:"stopped"`
+	Running    Members `json:"running"`
+	Unready    Members `json:"unready"`
+	Stopped    Members `json:"stopped"`
 }
 
 func NewZKCluster(namespace, cluster_name string, runningPods, unreadyPods, stoppedPods []*v1.Pod) *ZKCluster {
@@ -260,7 +260,7 @@ func NewZKCluster(namespace, cluster_name string, runningPods, unreadyPods, stop
 	}
 }
 
-func podsToMembers(id *clusterID, pods []*v1.Pod) *Members {
+func podsToMembers(id *clusterID, pods []*v1.Pod) Members {
 	members := Members{
 		clusterID: id,
 		members:   make(map[int]*Member, len(pods)),
@@ -268,7 +268,7 @@ func podsToMembers(id *clusterID, pods []*v1.Pod) *Members {
 	for _, pod := range pods {
 		members.Add(podToMember(id, pod))
 	}
-	return &members
+	return members
 }
 
 func getIdFromName(name string) int {

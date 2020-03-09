@@ -219,7 +219,7 @@ func (c *Cluster) ReplaceStoppedMembers() error {
 	c.logger.Infof("Some members are stopped: (%v)", c.zkCR.Status.Members.Stopped.GetMemberNames())
 
 	all := c.zkCR.Status.Members.Running.Copy()
-	all.Update(c.zkCR.Status.Members.Stopped)
+	all.Update(&c.zkCR.Status.Members.Stopped)
 
 	// TODO: we have a pattern: wait-for-error. Need to refactor this.
 	wait := sync.WaitGroup{}
