@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
 	"time"
@@ -83,7 +84,7 @@ type zookeeperSyncer struct {
 	logger *logrus.Entry
 }
 
-func (z *zookeeperSyncer) sync(obj interface{}) (bool, error) {
+func (z *zookeeperSyncer) sync(obj runtime.Object) (bool, error) {
 	sharedCluster := obj.(*api.ZookeeperCluster)
 	sharedCluster = sharedCluster.DeepCopy()
 	zkCluster := cluster.New(z.client.GetCRClient(sharedCluster.Namespace), sharedCluster)

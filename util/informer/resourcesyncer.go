@@ -6,13 +6,14 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
 
-type syncFunc func(obj interface{}) (bool, error)
+type syncFunc func(obj runtime.Object) (bool, error)
 
 type Syncer struct {
 	Sync   syncFunc
@@ -117,19 +118,20 @@ func (i *ResourceSyncer) onDelete(obj interface{}) {
 
 func (i *ResourceSyncer) consume(item interface{}) (bool, error) {
 	event := item.(*event)
+	ns, name, err := cache.SplitMetaNamespaceKey(event.key)
+
+	if err != nil {
+		return false, err
+	}
+
+	if len(ns) == 0 || len(name) == 0 {
+		return false, fmt.Errorf("invalid key %v: either namespace or name is missing", event.key)
+	}
+	obj, err := i.lister.ByNamespace(ns).Get(name)
+
 	if event.Type == watch.Deleted {
-		return i.syncer.Delete(event.key)
+		return i.syncer.Delete(obj)
 	} else {
-		ns, name, err := cache.SplitMetaNamespaceKey(event.key)
-
-		if err != nil {
-			return false, err
-		}
-
-		if len(ns) == 0 || len(name) == 0 {
-			return false, fmt.Errorf("invalid key %v: either namespace or name is missing", event.key)
-		}
-		obj, err := i.lister.ByNamespace(ns).Get(name)
 		if err != nil {
 			return false, errors.NewNotFound(i.resource.GroupResource(), name)
 		}
