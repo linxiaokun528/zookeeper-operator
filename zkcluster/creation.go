@@ -7,6 +7,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/klog"
 	"strings"
 )
 
@@ -44,12 +45,12 @@ func (c *Cluster) create() error {
 func (c *Cluster) logClusterCreation() {
 	specBytes, err := json.MarshalIndent(c.zkCR.Spec, "", "    ")
 	if err != nil {
-		c.logger.Errorf("failed to marshal spec of zookeeper cluster %s: %v", c.zkCR.Name, err)
+		klog.Errorf("failed to marshal spec of zookeeper cluster %s: %v", c.zkCR.Name, err)
 	}
 
-	c.logger.Info("creating zookeeper cluster %s with Spec:", c.zkCR.Name)
+	klog.Info("creating zookeeper cluster %s with Spec:", c.zkCR.Name)
 	for _, m := range strings.Split(string(specBytes), "\n") {
-		c.logger.Info(m)
+		klog.Info(m)
 	}
 }
 

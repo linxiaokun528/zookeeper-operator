@@ -2,6 +2,7 @@ package zkcluster
 
 import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/klog"
 	"sync"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/util/k8sutil"
@@ -68,9 +69,9 @@ func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 
 	_, err = c.client.Event().Create(k8sutil.MemberRemoveEvent(m.Name(), c.zkCR))
 	if err != nil {
-		c.logger.Errorf("failed to create remove member event: %v", err)
+		klog.Errorf("failed to create remove member event: %v", err)
 	}
 
-	c.logger.Infof("removed member (%v) with ID (%d)", m.Name, m.ID())
+	klog.Infof("removed member (%v) with ID (%d)", m.Name, m.ID())
 	return nil
 }

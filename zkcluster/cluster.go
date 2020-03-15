@@ -16,9 +16,9 @@ package zkcluster
 
 import (
 	"fmt"
-	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetretry "k8s.io/client-go/util/retry"
+	"k8s.io/klog"
 	"reflect"
 	"sync"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
@@ -33,7 +33,6 @@ type clusterEvent struct {
 }
 
 type Cluster struct {
-	logger *logrus.Entry
 	client client.CRClient
 
 	zkCR *api.ZookeeperCluster
@@ -42,9 +41,7 @@ type Cluster struct {
 }
 
 func New(client client.CRClient, zkCR *api.ZookeeperCluster) *Cluster {
-	lg := logrus.WithField("pkg", "zkCR").WithField("zkCR-name", zkCR.Name)
 	c := &Cluster{
-		logger: lg,
 		client: client,
 		zkCR:   zkCR,
 		locker: &sync.Mutex{},
@@ -75,7 +72,7 @@ func (c *Cluster) updateStatus() error {
 		// TODO: add a value to the status in CRD
 		new, err = c.client.ZookeeperCluster().Update(new)
 		if err != nil {
-			c.logger.Warningf("	Update CR status failed: %v", err)
+			klog.Warningf("	Update CR status failed: %v", err)
 		}
 		return err
 	})
@@ -106,7 +103,7 @@ func (c *Cluster) sync() error {
 	}()
 
 	if c.zkCR.Status.Members.Unready.Size() > 0 {
-		c.logger.Infof(fmt.Sprintf("skip reconciliation: running (%v), unready (%v)",
+		klog.Infof(fmt.Sprintf("skip reconciliation: running (%v), unready (%v)",
 			c.zkCR.Status.Members.Running.GetMemberNames(), c.zkCR.Status.Members.Unready.GetMemberNames()))
 		ReconcileFailed.WithLabelValues("not all pods are ready").Inc()
 		return nil

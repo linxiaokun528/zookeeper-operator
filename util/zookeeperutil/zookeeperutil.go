@@ -15,11 +15,10 @@
 package zookeeperutil
 
 import (
+	"k8s.io/klog"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/golang/glog"
 	/* TODO: The error message of this ZK client is too simple. Maybe change a zk client in the future.
 	 */
 	"github.com/samuel/go-zookeeper/zk"
@@ -29,7 +28,7 @@ func GetClusterConfig(hosts []string) ([]string, error) {
 	conn, _, err := zk.Connect(hosts, time.Second)
 	defer conn.Close()
 	if err != nil {
-		glog.Error("Failed to connect to ZK hosts: ", hosts)
+		klog.Error("Failed to connect to ZK hosts: ", hosts)
 		return nil, err
 	}
 
@@ -52,15 +51,15 @@ func ReconfigureCluster(hosts []string, desiredConfig []string) error {
 	conn, _, err := zk.Connect(hosts, time.Second)
 	defer conn.Close()
 	if err != nil {
-		glog.Error("Failed to connect to ZK hosts: ", hosts)
+		klog.Error("Failed to connect to ZK hosts: ", hosts)
 		return err
 	}
-	glog.Info("Pushing reconfig to zookeeper", desiredConfig)
+	klog.Info("Pushing reconfig to zookeeper", desiredConfig)
 	_, err = conn.Reconfig(desiredConfig, -1)
 
 	if err != nil {
 		// TODO: use the same logger in all the operator
-		glog.Error("Failed to push reconfig", hosts, desiredConfig)
+		klog.Error("Failed to push reconfig", hosts, desiredConfig)
 		return err
 	}
 

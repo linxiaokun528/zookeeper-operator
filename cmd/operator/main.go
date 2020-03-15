@@ -32,7 +32,7 @@ import (
 	"zookeeper-operator/util/probe"
 	"zookeeper-operator/version"
 
-	"github.com/sirupsen/logrus"
+	"github.com/samuel/go-zookeeper/zk"
 	"k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -40,6 +40,8 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/component-base/logs"
+	"k8s.io/klog"
 )
 
 var (
@@ -62,11 +64,19 @@ func init() {
 	flag.Parse()
 }
 
+type emptyLogger struct{}
+
+func (e *emptyLogger) Printf(string, ...interface{}) {}
+
 func main() {
-	logrus.Infof("zookeeper-operator Version: %v", version.Version)
-	logrus.Infof("Git SHA: %s", version.GitSHA)
-	logrus.Infof("Go Version: %s", runtime.Version())
-	logrus.Infof("Go OS/Arch: %s/%s", runtime.GOOS, runtime.GOARCH)
+	logs.InitLogs()
+	defer logs.FlushLogs()
+	zk.DefaultLogger = &emptyLogger{}
+
+	klog.Infof("zookeeper-operator Version: %v", version.Version)
+	klog.Infof("Git SHA: %s", version.GitSHA)
+	klog.Infof("Go Version: %s", runtime.Version())
+	klog.Infof("Go OS/Arch: %s/%s", runtime.GOOS, runtime.GOARCH)
 
 	if printVersion {
 		os.Exit(0)
@@ -90,7 +100,7 @@ func main() {
 
 		id, err := os.Hostname()
 		if err != nil {
-			logrus.Fatalf("failed to get hostname: %v", err)
+			klog.Fatalf("failed to get hostname: %v", err)
 		}
 
 		rl, err := resourcelock.New(resourcelock.LeasesResourceLock,
@@ -103,7 +113,7 @@ func main() {
 				EventRecorder: createRecorder(cli.KubernetesInterface(), name, namespace),
 			})
 		if err != nil {
-			logrus.Fatalf("error creating lock: %v", err)
+			klog.Fatalf("error creating lock: %v", err)
 		}
 
 		leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
@@ -114,7 +124,7 @@ func main() {
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: zkController.Run,
 				OnStoppedLeading: func() {
-					logrus.Fatalf("leader election lost")
+					klog.Fatalf("leader election lost")
 				},
 			},
 		})
@@ -126,7 +136,7 @@ func main() {
 func getEnv(name string) string {
 	value := os.Getenv(name)
 	if len(value) == 0 {
-		logrus.Fatalf("must set env (%s)", name)
+		klog.Fatalf("must set env (%s)", name)
 	}
 
 	return value
@@ -134,7 +144,7 @@ func getEnv(name string) string {
 
 func createRecorder(kubecli kubernetes.Interface, name, namespace string) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartLogging(logrus.Infof)
+	eventBroadcaster.StartLogging(klog.Infof)
 	// TODO: what does kubecli.CoreV1().RESTClient()).Events(namespace) do?
 	// When an event happend in leader election, will the EventRecorder send an event to k8s?
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(kubecli.CoreV1().RESTClient()).Events(namespace)})

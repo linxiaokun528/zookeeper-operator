@@ -1,6 +1,7 @@
 package zkcluster
 
 import (
+	"k8s.io/klog"
 	"zookeeper-operator/util/zookeeperutil"
 )
 
@@ -23,12 +24,12 @@ import (
 //}
 
 func (c *Cluster) reconfig(hosts []string, desiredConfig []string) error {
-	c.logger.Infoln("Reconfiguring zookeeper cluster", c.zkCR.Name)
+	klog.Infoln("Reconfiguring zookeeper cluster", c.zkCR.Name)
 
 	// TODO: remove this function and this file. Use zookeeperutil.ReconfigureCluster directly.
 	err := zookeeperutil.ReconfigureCluster(hosts, desiredConfig)
 	if err != nil {
-		c.logger.Infoln("Reconfigure error")
+		klog.Infoln("Reconfigure error")
 		return err
 	}
 

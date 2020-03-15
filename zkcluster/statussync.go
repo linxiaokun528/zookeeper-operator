@@ -5,6 +5,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/klog"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/util/k8sutil"
 )
@@ -24,11 +25,11 @@ func (c *Cluster) listPods() (pods []*v1.Pod, err error) {
 			continue
 		}
 		if len(pod.OwnerReferences) < 1 {
-			c.logger.Warningf("list pods: ignore pod %v: no owner", pod.Name)
+			klog.Warningf("list pods: ignore pod %v: no owner", pod.Name)
 			continue
 		}
 		if pod.OwnerReferences[0].UID != c.zkCR.UID {
-			c.logger.Warningf("list pods: ignore pod %v: owner (%v) is not %v",
+			klog.Warningf("list pods: ignore pod %v: owner (%v) is not %v",
 				pod.Name, pod.OwnerReferences[0].UID, c.zkCR.UID)
 			continue
 		}

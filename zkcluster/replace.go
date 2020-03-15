@@ -1,13 +1,14 @@
 package zkcluster
 
 import (
+	"k8s.io/klog"
 	"sync"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/util/k8sutil"
 )
 
 func (c *Cluster) ReplaceStoppedMembers() error {
-	c.logger.Infof("Some members are stopped: (%v)", c.zkCR.Status.Members.Stopped.GetMemberNames())
+	klog.Infof("Some members are stopped: (%v)", c.zkCR.Status.Members.Stopped.GetMemberNames())
 
 	all := c.zkCR.Status.Members.Running.Copy()
 	all.Update(&c.zkCR.Status.Members.Stopped)
@@ -40,7 +41,7 @@ func (c *Cluster) ReplaceStoppedMembers() error {
 }
 
 func (c *Cluster) replaceOneStoppedMember(toReplace *api.Member, cluster *api.Members) error {
-	c.logger.Infof("replacing dead member %q", toReplace.Name)
+	klog.Infof("replacing dead member %q", toReplace.Name)
 
 	err := c.removeOneMember(toReplace)
 	if err != nil {
@@ -58,7 +59,7 @@ func (c *Cluster) replaceOneStoppedMember(toReplace *api.Member, cluster *api.Me
 
 	_, err = c.client.Event().Create(k8sutil.ReplacingDeadMemberEvent(toReplace.Name(), c.zkCR))
 	if err != nil {
-		c.logger.Errorf("failed to create replacing dead member event: %v", err)
+		klog.Errorf("failed to create replacing dead member event: %v", err)
 	}
 
 	return nil

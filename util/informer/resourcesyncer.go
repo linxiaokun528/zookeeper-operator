@@ -3,7 +3,6 @@ package informer
 import (
 	"context"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -11,6 +10,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 )
 
 type syncFunc func(obj runtime.Object) (bool, error)
@@ -29,18 +29,15 @@ type ResourceSyncer struct {
 	resource *schema.GroupVersionResource
 	informer cache.SharedIndexInformer
 	lister   cache.GenericLister
-
-	logger *logrus.Entry
 }
 
 func NewResourceSyncer(informer cache.SharedIndexInformer, resource *schema.GroupVersionResource,
-	logger *logrus.Entry, newSyncerFunc NewSyncerFunc) *ResourceSyncer {
+	newSyncerFunc NewSyncerFunc) *ResourceSyncer {
 	lister := cache.NewGenericLister(informer.GetIndexer(), resource.GroupResource())
 
 	result := ResourceSyncer{
 		resource: resource,
 		informer: informer,
-		logger:   logger,
 		lister:   lister,
 	}
 
@@ -67,12 +64,6 @@ func (i *ResourceSyncer) Run(ctx context.Context, workerNum int) {
 	defer utilruntime.HandleCrash()
 	defer i.eventQueue.ShutDown()
 
-	i.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    i.onAdd,
-		UpdateFunc: i.onUpdate,
-		DeleteFunc: i.onDelete,
-	})
-
 	go i.informer.Run(ctx.Done())
 
 	if !cache.WaitForNamedCacheSync(
@@ -80,13 +71,20 @@ func (i *ResourceSyncer) Run(ctx context.Context, workerNum int) {
 		ctx.Done(), i.informer.HasSynced) {
 		return
 	}
+
+	i.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    i.onAdd,
+		UpdateFunc: i.onUpdate,
+		DeleteFunc: i.onDelete,
+	})
+
 	i.eventQueue.Consume(workerNum)
 	<-ctx.Done()
 
 }
 
 func (i *ResourceSyncer) onAdd(obj interface{}) {
-	i.logger.Info(fmt.Sprintf("Receive a creation event for %s", i.objToKey(obj)))
+	klog.Info(fmt.Sprintf("Receive a creation event for %s", i.objToKey(obj)))
 	i.eventQueue.Add(&event{
 		Type: watch.Modified,
 		key:  i.objToKey(obj),
@@ -94,7 +92,7 @@ func (i *ResourceSyncer) onAdd(obj interface{}) {
 }
 
 func (i *ResourceSyncer) onUpdate(oldObj, newObj interface{}) {
-	i.logger.Info(fmt.Sprintf("Receive a update event for %s", i.objToKey(newObj)))
+	klog.Info(fmt.Sprintf("Receive a update event for %s", i.objToKey(newObj)))
 	i.eventQueue.Add(&event{
 		Type: watch.Modified,
 		key:  i.objToKey(newObj),
@@ -106,7 +104,7 @@ func (i *ResourceSyncer) onDelete(obj interface{}) {
 	if ok {
 		obj = tombstone.Obj
 	}
-	i.logger.Info(fmt.Sprintf("Receive a deletion event for %s", i.objToKey(obj)))
+	klog.Info(fmt.Sprintf("Receive a deletion event for %s", i.objToKey(obj)))
 
 	if i.syncer.Delete != nil {
 		i.eventQueue.Add(&event{

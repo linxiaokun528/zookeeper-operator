@@ -23,21 +23,16 @@ import (
 	"zookeeper-operator/client"
 	zkInformers "zookeeper-operator/generated/informers/externalversions"
 	"zookeeper-operator/util/informer"
-
-	"github.com/sirupsen/logrus"
 )
 
 var initRetryWaitTime = 30 * time.Second
 
 type Controller struct {
-	logger *logrus.Entry
-
 	client client.Client
 }
 
 func New(client client.Client) *Controller {
 	return &Controller{
-		logger: logrus.WithField("pkg", "controller"),
 		client: client,
 	}
 }
@@ -57,12 +52,11 @@ func (c *Controller) newResourceSyncerForZookeeper() *informer.ResourceSyncer {
 	zkInformer := sharedInformerFactory.Zookeeper().V1alpha1().ZookeeperClusters().Informer()
 	groupVersionResource := v1alpha1.SchemeGroupVersion.WithResource("zookeeperclusters")
 
-	resourceSyncer := informer.NewResourceSyncer(zkInformer, &groupVersionResource, c.logger,
+	resourceSyncer := informer.NewResourceSyncer(zkInformer, &groupVersionResource,
 		func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) informer.Syncer {
 			zkSyncer := zookeeperSyncer{
 				adder:  adder,
 				client: c.client,
-				logger: c.logger,
 			}
 
 			return informer.Syncer{

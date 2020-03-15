@@ -2,6 +2,7 @@ package zkcluster
 
 import (
 	"fmt"
+	"k8s.io/klog"
 	"sync"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/util/k8sutil"
@@ -51,10 +52,10 @@ func (c *Cluster) addOneMember(m *api.Member, allClusterMembers *api.Members) er
 		return fmt.Errorf("fail to create member's pod (%s): %v", m.Name(), err)
 	}
 
-	c.logger.Infof("added member (%s)", m.Name())
+	klog.Infof("added member (%s)", m.Name())
 	_, err = c.client.Event().Create(k8sutil.NewMemberAddEvent(m.Name(), c.zkCR))
 	if err != nil {
-		c.logger.Errorf("failed to create new member add event: %v", err)
+		klog.Errorf("failed to create new member add event: %v", err)
 	}
 	return nil
 }
