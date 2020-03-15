@@ -16,14 +16,11 @@ package controller
 
 import (
 	"context"
-	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
 	"time"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
 	v1alpha1 "zookeeper-operator/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/client"
-	"zookeeper-operator/cluster"
 	zkInformers "zookeeper-operator/generated/informers/externalversions"
 	"zookeeper-operator/util/informer"
 
@@ -48,13 +45,13 @@ func New(client client.Client) *Controller {
 func (c *Controller) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
-	resourceSyncer := c.newZookeeperSyncer()
+	resourceSyncer := c.newResourceSyncerForZookeeper()
 	resourceSyncer.Run(ctx, 5)
 
 	// TODO: add a pod informer to watch related pods
 }
 
-func (c *Controller) newZookeeperSyncer() *informer.ResourceSyncer {
+func (c *Controller) newResourceSyncerForZookeeper() *informer.ResourceSyncer {
 	sharedInformerFactory := zkInformers.NewSharedInformerFactory(c.client.ZookeeperInterface(), time.Minute*2)
 
 	zkInformer := sharedInformerFactory.Zookeeper().V1alpha1().ZookeeperClusters().Informer()
@@ -64,7 +61,6 @@ func (c *Controller) newZookeeperSyncer() *informer.ResourceSyncer {
 		func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) informer.Syncer {
 			zkSyncer := zookeeperSyncer{
 				adder:  adder,
-				lister: lister,
 				client: c.client,
 				logger: c.logger,
 			}
@@ -75,46 +71,4 @@ func (c *Controller) newZookeeperSyncer() *informer.ResourceSyncer {
 		})
 
 	return resourceSyncer
-}
-
-type zookeeperSyncer struct {
-	adder  informer.ResourceRateLimitingAdder
-	lister cache.GenericLister
-	client client.Client
-	logger *logrus.Entry
-}
-
-func (z *zookeeperSyncer) sync(obj runtime.Object) (bool, error) {
-	sharedCluster := obj.(*api.ZookeeperCluster)
-	sharedCluster = sharedCluster.DeepCopy()
-	zkCluster := cluster.New(z.client.GetCRClient(sharedCluster.Namespace), sharedCluster)
-	defer func() {
-		if !zkCluster.IsFinished() {
-			z.adder.AddAfter(sharedCluster, 30*time.Second)
-		}
-	}()
-
-	start := time.Now()
-
-	if sharedCluster.Status.Phase == api.ClusterPhaseNone {
-		err := zkCluster.Create()
-		if err != nil {
-			return false, err
-		}
-	}
-	rerr := zkCluster.Sync()
-
-	cluster.ReconcileHistogram.WithLabelValues(sharedCluster.Name).Observe(time.Since(start).Seconds())
-
-	if rerr != nil {
-		cluster.ReconcileFailed.WithLabelValues(rerr.Error()).Inc()
-		if cluster.IsFatalError(rerr) {
-			sharedCluster.Status.SetReason(rerr.Error())
-			z.logger.Errorf("cluster failed: %v", rerr)
-			zkCluster.ReportFailedStatus()
-		}
-		return false, rerr
-	}
-
-	return true, nil
 }

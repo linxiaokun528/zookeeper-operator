@@ -30,7 +30,7 @@ func NewMemberAddEvent(memberName string, cl *api.ZookeeperCluster) *v1.Event {
 	event := newClusterEvent(cl)
 	event.Type = v1.EventTypeNormal
 	event.Reason = "New Member Added"
-	event.Message = fmt.Sprintf("New member %s added to cluster", memberName)
+	event.Message = fmt.Sprintf("New member %s added to zkcluster", memberName)
 	return event
 }
 
@@ -38,7 +38,7 @@ func MemberRemoveEvent(memberName string, cl *api.ZookeeperCluster) *v1.Event {
 	event := newClusterEvent(cl)
 	event.Type = v1.EventTypeNormal
 	event.Reason = "Member Removed"
-	event.Message = fmt.Sprintf("Existing member %s removed from the cluster", memberName)
+	event.Message = fmt.Sprintf("Existing member %s removed from the zkcluster", memberName)
 	return event
 }
 
@@ -76,7 +76,7 @@ func newClusterEvent(cl *api.ZookeeperCluster) *v1.Event {
 		Source: v1.EventSource{
 			Component: os.Getenv(constants.EnvOperatorPodName),
 		},
-		// Each cluster event is unique so it should not be collapsed with other events
+		// Each zkcluster event is unique so it should not be collapsed with other events
 		FirstTimestamp: metav1.Time{Time: t},
 		LastTimestamp:  metav1.Time{Time: t},
 		Count:          int32(1),

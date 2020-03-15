@@ -16,14 +16,14 @@ package k8sutil
 
 import (
 	"fmt"
-	"time"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/util/retryutil"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clientsetretry "k8s.io/client-go/util/retry"
 )
 
 type CRD interface {
@@ -40,7 +40,7 @@ type crd struct {
 
 func (c *crd) Create() error {
 	customResourceDefinition, err := c.client.Create(c.customResourceDefinition)
-	if err != nil && !IsKubernetesResourceAlreadyExistError(err) {
+	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
 	c.customResourceDefinition = customResourceDefinition
@@ -48,25 +48,30 @@ func (c *crd) Create() error {
 }
 
 func (c *crd) Wait() error {
-	err := retryutil.Retry(5*time.Second, 20, func() (bool, error) {
-		crd, err := c.client.Get(c.customResourceDefinition.Name, metav1.GetOptions{})
-		if err != nil {
-			return false, err
-		}
-		for _, cond := range crd.Status.Conditions {
-			switch cond.Type {
-			case apiextensionsv1.Established:
-				if cond.Status == apiextensionsv1.ConditionTrue {
-					return true, nil
-				}
-			case apiextensionsv1.NamesAccepted:
-				if cond.Status == apiextensionsv1.ConditionFalse {
-					return false, fmt.Errorf("Name conflict: %v", cond.Reason)
+	err := clientsetretry.OnError(clientsetretry.DefaultRetry,
+		func(err error) bool {
+			return true
+		},
+		func() error {
+			crd, err := c.client.Get(c.customResourceDefinition.Name, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			for _, cond := range crd.Status.Conditions {
+				switch cond.Type {
+				case apiextensionsv1.Established:
+					if cond.Status == apiextensionsv1.ConditionTrue {
+						return nil
+					}
+				case apiextensionsv1.NamesAccepted:
+					if cond.Status == apiextensionsv1.ConditionFalse {
+						return fmt.Errorf("Name conflict: %v", cond.Reason)
+					}
 				}
 			}
-		}
-		return false, nil
-	})
+			return fmt.Errorf("Not ready yet")
+		})
+
 	if err != nil {
 		return fmt.Errorf("wait CRD created failed: %v", err)
 	}

@@ -21,7 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/cluster"
+	"zookeeper-operator/zkcluster"
 )
 
 func TestHandleClusterEventUpdateFailedCluster(t *testing.T) {
@@ -40,7 +40,7 @@ func TestHandleClusterEventUpdateFailedCluster(t *testing.T) {
 		Object: clus,
 	}
 	_, err := c.handleClusterEvent(e)
-	prefix := "ignore failed cluster"
+	prefix := "ignore failed zkcluster"
 	if !strings.HasPrefix(err.Error(), prefix) {
 		t.Errorf("expect err='%s...', get=%v", prefix, err)
 	}
@@ -62,14 +62,14 @@ func TestHandleClusterEventDeleteFailedCluster(t *testing.T) {
 		Object: clus,
 	}
 
-	c.clusters[name] = &cluster.Cluster{}
+	c.clusters[name] = &zkcluster.Cluster{}
 
 	if _, err := c.handleClusterEvent(e); err != nil {
 		t.Fatal(err)
 	}
 
 	if c.clusters[name] != nil {
-		t.Errorf("failed cluster not cleaned up after delete event, cluster struct: %v", c.clusters[name])
+		t.Errorf("failed zkcluster not cleaned up after delete event, zkcluster struct: %v", c.clusters[name])
 	}
 }
 
@@ -89,7 +89,7 @@ func TestHandleClusterEventClusterwide(t *testing.T) {
 		Object: clus,
 	}
 	if ignored, _ := c.handleClusterEvent(e); ignored {
-		t.Errorf("cluster shouldn't be ignored")
+		t.Errorf("zkcluster shouldn't be ignored")
 	}
 }
 
@@ -106,7 +106,7 @@ func TestHandleClusterEventClusterwideIgnored(t *testing.T) {
 		Object: clus,
 	}
 	if ignored, _ := c.handleClusterEvent(e); !ignored {
-		t.Errorf("cluster should be ignored")
+		t.Errorf("zkcluster should be ignored")
 	}
 }
 
@@ -126,6 +126,6 @@ func TestHandleClusterEventNamespacedIgnored(t *testing.T) {
 		Object: clus,
 	}
 	if ignored, _ := c.handleClusterEvent(e); !ignored {
-		t.Errorf("cluster should be ignored")
+		t.Errorf("zkcluster should be ignored")
 	}
 }

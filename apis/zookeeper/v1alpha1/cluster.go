@@ -17,6 +17,7 @@ package v1alpha1
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"k8s.io/api/core/v1"
@@ -40,14 +41,17 @@ type ZookeeperClusterList struct {
 }
 
 // +genclient
-// +genclient:noStatus
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 type ZookeeperCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              ClusterSpec   `json:"spec"`
-	Status            ClusterStatus `json:"status"`
+	Spec              ClusterSpec    `json:"spec"`
+	Status            *ClusterStatus `json:"status"`
+}
+
+func (c *ZookeeperCluster) GetFullName() string {
+	return fmt.Sprintf("%s/%s", c.Namespace, c.Name)
 }
 
 func (c *ZookeeperCluster) AsOwner() metav1.OwnerReference {
@@ -67,6 +71,10 @@ func (c *ZookeeperCluster) UnmarshalJSON(b []byte) error {
 	if err != nil {
 		return err
 	}
+
+	if c.Status == nil {
+		c.Status = &ClusterStatus{}
+	}
 	if c.Status.Members != nil {
 		clusterID := clusterID{namespace: c.Namespace, clusterName: c.Name}
 		c.Status.Members.setClusterID(&clusterID)
@@ -84,9 +92,9 @@ type JVMPolicy struct {
 }
 
 type ClusterSpec struct {
-	// Size is the expected size of the zookeeper cluster.
+	// Size is the expected size of the zookeeper zkcluster.
 	// The zookeeper-operator will eventually make the size of the running
-	// cluster equal to the expected size.
+	// zkcluster equal to the expected size.
 	// The valid range of the size is from 1 to infinite
 	Size int `json:"size"`
 	// Repository is the name of the repository that hosts
@@ -98,8 +106,8 @@ type ClusterSpec struct {
 	// By default, it is `zookeeper`.
 	Repository string `json:"repository,omitempty"`
 
-	// Version is the expected version of the zookeeper cluster.
-	// The zookeeper-operator will eventually make the zookeeper cluster version
+	// Version is the expected version of the zookeeper zkcluster.
+	// The zookeeper-operator will eventually make the zookeeper zkcluster version
 	// equal to the expected version.
 	//
 	// The version must follow the [semver]( http://semver.org) format, for example "3.5.3-beta".
@@ -120,7 +128,7 @@ type ClusterSpec struct {
 // PodPolicy defines the policy to create pod for the zookeeper container.
 type PodPolicy struct {
 	// Labels specifies the labels to attach to pods the operator creates for the
-	// zookeeper cluster.
+	// zookeeper zkcluster.
 	// "app" and "zookeeper_*" labels are reserved for the internal use of the zookeeper operator.
 	// Do not overwrite them.
 	Labels map[string]string `json:"labels,omitempty"`
@@ -136,16 +144,16 @@ type PodPolicy struct {
 	AntiAffinity bool `json:"antiAffinity,omitempty"`
 
 	// Resources is the resource requirements for the zookeeper container.
-	// This field cannot be updated once the cluster is created.
+	// This field cannot be updated once the zkcluster is created.
 	Resources v1.ResourceRequirements `json:"resources,omitempty"`
 
 	// Tolerations specifies the pod's tolerations.
 	Tolerations []v1.Toleration `json:"tolerations,omitempty"`
 
 	// List of environment variables to set in the zookeeper container.
-	// This is used to configure zookeeper process. zookeeper cluster cannot be created, when
+	// This is used to configure zookeeper process. zookeeper zkcluster cannot be created, when
 	// bad environement variables are provided. Do not overwrite any flags used to
-	// bootstrap the cluster (for example `--initial-cluster` flag).
+	// bootstrap the zkcluster (for example `--initial-zkcluster` flag).
 	// This field cannot be updated.
 	ZookeeperEnv []v1.EnvVar `json:"zookeeperEnv,omitempty"`
 
@@ -156,7 +164,7 @@ type PodPolicy struct {
 	PersistentVolumeClaimSpec *v1.PersistentVolumeClaimSpec `json:"persistentVolumeClaimSpec,omitempty"`
 
 	// Annotations specifies the annotations to attach to pods the operator creates for the
-	// zookeeper cluster.
+	// zookeeper zkcluster.
 	// The "zookeeper.version" annotation is reserved for the internal use of the zookeeper operator.
 	Annotations map[string]string `json:"annotations,omitempty"`
 
@@ -207,7 +215,7 @@ func (e *ZookeeperCluster) SetDefaults() {
 			PodAntiAffinity: &v1.PodAntiAffinity{
 				RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{
 					{
-						// set anti-affinity to the zookeeper pods that belongs to the same cluster
+						// set anti-affinity to the zookeeper pods that belongs to the same zkcluster
 						LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
 							"zookeeper_cluster": e.Name,
 						}},
