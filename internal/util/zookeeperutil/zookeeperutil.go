@@ -49,11 +49,11 @@ func GetClusterConfig(hosts []string) ([]string, error) {
 
 func ReconfigureCluster(hosts []string, desiredConfig []string) error {
 	conn, _, err := zk.Connect(hosts, time.Second)
-	defer conn.Close()
 	if err != nil {
 		klog.Error("Failed to connect to ZK hosts: ", hosts)
 		return err
 	}
+	defer conn.Close()
 	klog.Info("Pushing reconfig to zookeeper", desiredConfig)
 	_, err = conn.Reconfig(desiredConfig, -1)
 
