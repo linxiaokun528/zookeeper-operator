@@ -48,8 +48,8 @@ type ClusterStatus struct {
 	// ServiceName is the LB service for accessing zookeeper nodes.
 	ServiceName string `json:"serviceName,omitempty"`
 
-	// ClientPort is the port for zookeeper client to access.
-	// It's the same on client LB service and zookeeper nodes.
+	// ClientPort is the port for zookeeper zkclient to access.
+	// It's the same on zkclient LB service and zookeeper nodes.
 	ClientPort int `json:"clientPort,omitempty"`
 
 	// Members are the zookeeper members in the zkcluster

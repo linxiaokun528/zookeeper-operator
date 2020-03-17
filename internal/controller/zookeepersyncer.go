@@ -4,15 +4,15 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/runtime"
 	"time"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/client"
-	"zookeeper-operator/util/informer"
-	"zookeeper-operator/zkcluster"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/internal/util/k8sclient"
+	"zookeeper-operator/internal/zkcluster"
+	"zookeeper-operator/pkg/informer"
 )
 
 type zookeeperSyncer struct {
 	adder  informer.ResourceRateLimitingAdder
-	client client.Client
+	client k8sclient.Client
 	logger *logrus.Entry
 }
 

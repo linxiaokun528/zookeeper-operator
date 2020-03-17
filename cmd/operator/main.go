@@ -22,15 +22,15 @@ import (
 	"os"
 	"runtime"
 	"time"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/client"
-	"zookeeper-operator/util/k8sutil"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/internal/util/k8sclient"
+	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"zookeeper-operator/controller"
-	"zookeeper-operator/util/constants"
-	"zookeeper-operator/util/probe"
-	"zookeeper-operator/version"
+	"zookeeper-operator/internal/controller"
+	"zookeeper-operator/internal/util/constants"
+	"zookeeper-operator/internal/util/probe"
+	"zookeeper-operator/internal/version"
 
 	"github.com/samuel/go-zookeeper/zk"
 	"k8s.io/api/core/v1"
@@ -64,14 +64,16 @@ func init() {
 	flag.Parse()
 }
 
-type emptyLogger struct{}
+type loggerForGoZK struct{}
 
-func (e *emptyLogger) Printf(string, ...interface{}) {}
+func (e *loggerForGoZK) Printf(format string, args ...interface{}) {
+	klog.V(4).Infof(format, args...)
+}
 
 func main() {
 	logs.InitLogs()
 	defer logs.FlushLogs()
-	zk.DefaultLogger = &emptyLogger{}
+	zk.DefaultLogger = &loggerForGoZK{}
 
 	klog.Infof("zookeeper-operator Version: %v", version.Version)
 	klog.Infof("Git SHA: %s", version.GitSHA)
@@ -82,7 +84,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	cli := client.NewClientOrDie(masterURL, kubeconfig)
+	cli := k8sclient.NewClientOrDie(masterURL, kubeconfig)
 	initCRDOrDie(cli.GetCRDClient())
 
 	http.HandleFunc(probe.HTTPReadyzEndpoint, probe.ReadyzHandler)
@@ -151,8 +153,8 @@ func createRecorder(kubecli kubernetes.Interface, name, namespace string) record
 	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: name})
 }
 
-// TODO: consider manage CRD outside of operator. If so, refactor client.Client: use client.CRClient to replace
-// client.Client. We won't need CRDClient anymore.
+// TODO: consider manage CRD outside of operator. If so, refactor zkclient.Client: use zkclient.CRClient to replace
+// zkclient.Client. We won't need CRDClient anymore.
 func initCRDOrDie(client apiextensionsclientv1.CustomResourceDefinitionInterface) {
 	err := initCRD(client)
 	if err != nil {
@@ -161,7 +163,7 @@ func initCRDOrDie(client apiextensionsclientv1.CustomResourceDefinitionInterface
 }
 
 func initCRD(client apiextensionsclientv1.CustomResourceDefinitionInterface) error {
-	crd := k8sutil.NewCRD(client, api.ZookeeperClusterCRDName, api.ZookeeperClusterResourceKind,
+	crd := k8sutil2.NewCRD(client, api.ZookeeperClusterCRDName, api.ZookeeperClusterResourceKind,
 		api.ZookeeperClusterResourcePlural, "zookeeper")
 	return crd.CreateAndWait()
 }

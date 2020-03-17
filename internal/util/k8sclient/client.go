@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package k8sclient
 
 import (
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -20,8 +20,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
-	"zookeeper-operator/generated/clientset/versioned"
-	"zookeeper-operator/generated/clientset/versioned/typed/zookeeper/v1alpha1"
+	"zookeeper-operator/internal/client/clientset/versioned"
+	"zookeeper-operator/internal/client/clientset/versioned/typed/zookeeper/v1alpha1"
 )
 
 func NewClientOrDie(masterURL string, kubeconfigPath string) Client {

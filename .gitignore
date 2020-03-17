@@ -32,6 +32,6 @@ vendor/
 
 go.sum
 
-# generated code
-apis/zookeeper/v1alpha1/zz_generated.deepcopy.go
-generated
+# zkclient code
+internal/apis/zookeeper/v1alpha1/zz_generated.deepcopy.go
+internal/zkclient

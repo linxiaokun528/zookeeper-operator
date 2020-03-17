@@ -21,8 +21,8 @@ import (
 	"k8s.io/klog"
 	"reflect"
 	"sync"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/client"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/internal/util/k8sclient"
 )
 
 type clusterEventType string
@@ -33,14 +33,14 @@ type clusterEvent struct {
 }
 
 type Cluster struct {
-	client client.CRClient
+	client k8sclient.CRClient
 
 	zkCR *api.ZookeeperCluster
 
 	locker sync.Locker
 }
 
-func New(client client.CRClient, zkCR *api.ZookeeperCluster) *Cluster {
+func New(client k8sclient.CRClient, zkCR *api.ZookeeperCluster) *Cluster {
 	c := &Cluster{
 		client: client,
 		zkCR:   zkCR,
@@ -146,7 +146,7 @@ func (c *Cluster) sync() error {
 	return nil
 }
 
-// TODO: also need to check /client/zookeeper
+// TODO: also need to check /zkclient/zookeeper
 func (c *Cluster) IsFinished() bool {
 	return c.zkCR.Status.Members.Running.Size() == c.zkCR.Spec.Size
 }

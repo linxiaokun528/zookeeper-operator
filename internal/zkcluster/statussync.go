@@ -6,8 +6,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/util/k8sutil"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 )
 
 func (c *Cluster) listPods() (pods []*v1.Pod, err error) {
@@ -44,7 +44,7 @@ func (c *Cluster) syncCurrentMembers() (err error) {
 	if err != nil {
 		return err
 	}
-	running_pods, unready_pods, stopped_pods := k8sutil.GetPodsSeparatedByStatus(pods)
+	running_pods, unready_pods, stopped_pods := k8sutil2.GetPodsSeparatedByStatus(pods)
 
 	c.zkCR.Status.Members = api.NewZKCluster(c.zkCR.Namespace, c.zkCR.Name, running_pods, unready_pods, stopped_pods)
 

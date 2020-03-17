@@ -2,7 +2,7 @@ package zkcluster
 
 import (
 	"k8s.io/klog"
-	"zookeeper-operator/util/zookeeperutil"
+	"zookeeper-operator/internal/util/zookeeperutil"
 )
 
 //func (c *Cluster) needReconfig() (bool, error) {

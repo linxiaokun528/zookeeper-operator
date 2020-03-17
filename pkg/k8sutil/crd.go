@@ -18,7 +18,7 @@ import (
 	"fmt"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"

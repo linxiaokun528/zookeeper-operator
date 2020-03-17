@@ -6,12 +6,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strconv"
 	"strings"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/util/k8sutil"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 )
 
 const (
-	// ZookeeperClientPort is the client port on client service and zookeeper nodes.
+	// ZookeeperClientPort is the zkclient port on zkclient service and zookeeper nodes.
 	ZookeeperClientPort = 2181
 
 	zookeeperDataVolumeMountDir   = "/data"
@@ -151,7 +151,7 @@ func applyPodPolicy(clusterName string, pod *v1.Pod, policy *api.PodPolicy) {
 	}
 
 	// TODO: write a map util or import a map util
-	k8sutil.MergeLabels(pod.Labels, policy.Labels)
+	k8sutil2.MergeLabels(pod.Labels, policy.Labels)
 
 	for i := range pod.Spec.Containers {
 		pod.Spec.Containers[i].Resources = policy.Resources
@@ -200,10 +200,10 @@ func zookeeperVolumeMounts() []v1.VolumeMount {
 func zookeeperContainer(repo, version string) v1.Container {
 	c := v1.Container{
 		Name:  "zookeeper",
-		Image: k8sutil.ImageName(repo, version),
+		Image: k8sutil2.ImageName(repo, version),
 		Ports: []v1.ContainerPort{
 			{
-				Name:          "client",
+				Name:          "zkclient",
 				ContainerPort: int32(ZookeeperClientPort),
 				Protocol:      v1.ProtocolTCP,
 			},

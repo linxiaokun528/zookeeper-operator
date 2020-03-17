@@ -19,19 +19,19 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
 	"time"
-	v1alpha1 "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/client"
-	zkInformers "zookeeper-operator/generated/informers/externalversions"
-	"zookeeper-operator/util/informer"
+	v1alpha1 "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	zkInformers "zookeeper-operator/internal/client/informers/externalversions"
+	"zookeeper-operator/internal/util/k8sclient"
+	"zookeeper-operator/pkg/informer"
 )
 
 var initRetryWaitTime = 30 * time.Second
 
 type Controller struct {
-	client client.Client
+	client k8sclient.Client
 }
 
-func New(client client.Client) *Controller {
+func New(client k8sclient.Client) *Controller {
 	return &Controller{
 		client: client,
 	}

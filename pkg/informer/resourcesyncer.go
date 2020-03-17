@@ -31,6 +31,7 @@ type ResourceSyncer struct {
 	lister   cache.GenericLister
 }
 
+// TODO: informer can be generated automatically using "sigs.k8s.io/controller-runtime"
 func NewResourceSyncer(informer cache.SharedIndexInformer, resource *schema.GroupVersionResource,
 	newSyncerFunc NewSyncerFunc) *ResourceSyncer {
 	lister := cache.NewGenericLister(informer.GetIndexer(), resource.GroupResource())

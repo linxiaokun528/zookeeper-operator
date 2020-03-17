@@ -4,8 +4,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog"
 	"sync"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/util/k8sutil"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
 )
 
 func (c *Cluster) scaleDown() error {
@@ -60,14 +59,14 @@ func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 	// TODO: @MDF: Add PV support
 	/*
 		if c.isPodPVEnabled() {
-			err = c.removePVC(k8sutil.PVCNameFromMember(toRemove.Name))
+			err = c.removePVC(k8sclient.PVCNameFromMember(toRemove.Name))
 			if err != nil {
 				return err
 			}
 		}
 	*/
 
-	_, err = c.client.Event().Create(k8sutil.MemberRemoveEvent(m.Name(), c.zkCR))
+	_, err = c.client.Event().Create(MemberRemoveEvent(m.Name(), c.zkCR))
 	if err != nil {
 		klog.Errorf("failed to create remove member event: %v", err)
 	}

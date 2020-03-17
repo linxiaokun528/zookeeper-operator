@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"k8s.io/klog"
 	"sync"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/util/k8sutil"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
 )
 
 func (c *Cluster) scaleUp() error {
@@ -53,7 +52,7 @@ func (c *Cluster) addOneMember(m *api.Member, allClusterMembers *api.Members) er
 	}
 
 	klog.Infof("added member (%s)", m.Name())
-	_, err = c.client.Event().Create(k8sutil.NewMemberAddEvent(m.Name(), c.zkCR))
+	_, err = c.client.Event().Create(NewMemberAddEvent(m.Name(), c.zkCR))
 	if err != nil {
 		klog.Errorf("failed to create new member add event: %v", err)
 	}

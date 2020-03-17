@@ -16,9 +16,8 @@ package zkcluster
 
 import (
 	"fmt"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-
-	"zookeeper-operator/util/k8sutil"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog"
@@ -48,22 +47,22 @@ func (c *Cluster) upgradeOneMember(memberName string) error {
 	oldpod := pod.DeepCopy()
 
 	klog.Infof("upgrading the zookeeper member %v from %s to %s", memberName, getZookeeperVersion(pod), c.zkCR.Spec.Version)
-	pod.Spec.Containers[0].Image = k8sutil.ImageName(c.zkCR.Spec.Repository, c.zkCR.Spec.Version)
+	pod.Spec.Containers[0].Image = k8sutil2.ImageName(c.zkCR.Spec.Repository, c.zkCR.Spec.Version)
 	setZookeeperVersion(pod, c.zkCR.Spec.Version)
 
-	//patchdata, err := k8sutil.CreatePatch(oldpod, pod, v1.Pod{})
+	//patchdata, err := k8sclient.CreatePatch(oldpod, pod, v1.Pod{})
 	//if err != nil {
 	//	return fmt.Errorf("error creating patch: %v", err)
 	//}
 	//
-	//_, err = c.client.Pod().Patch(pod.GetName(), types.StrategicMergePatchType, patchdata)
+	//_, err = c.zkclient.Pod().Patch(pod.GetName(), types.StrategicMergePatchType, patchdata)
 	// TODO: Use retry mechanism
 	_, err = c.client.Pod().Update(pod)
 	if err != nil {
 		return fmt.Errorf("fail to update the zookeeper member (%s): %v", memberName, err)
 	}
 	klog.Infof("finished upgrading the zookeeper member %v", memberName)
-	_, err = c.client.Event().Create(k8sutil.MemberUpgradedEvent(memberName, getZookeeperVersion(oldpod), c.zkCR.Spec.Version, c.zkCR))
+	_, err = c.client.Event().Create(MemberUpgradedEvent(memberName, getZookeeperVersion(oldpod), c.zkCR.Spec.Version, c.zkCR))
 	if err != nil {
 		klog.Errorf("failed to create member upgraded event: %v", err)
 	}

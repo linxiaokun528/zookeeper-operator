@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 	"time"
-	/* TODO: The error message of this ZK client is too simple. Maybe change a zk client in the future.
+	/* TODO: The error message of this ZK zkclient is too simple. Maybe change a zk zkclient in the future.
 	 */
 	"github.com/samuel/go-zookeeper/zk"
 )

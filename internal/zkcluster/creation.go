@@ -57,17 +57,17 @@ func (c *Cluster) logClusterCreation() {
 // TODO: write this service into a configurefile
 func newClientService(clusterName string) *v1.Service {
 	ports := []v1.ServicePort{{
-		Name:       "client",
+		Name:       "zkclient",
 		Port:       ZookeeperClientPort,
 		TargetPort: intstr.FromInt(ZookeeperClientPort),
 		Protocol:   v1.ProtocolTCP,
 	}}
-	return newService(clusterName+"-client", clusterName, "", ports)
+	return newService(clusterName+"-zkclient", clusterName, "", ports)
 }
 
 func newPeerService(clusterName string) *v1.Service {
 	ports := []v1.ServicePort{{
-		Name:       "client",
+		Name:       "zkclient",
 		Port:       ZookeeperClientPort,
 		TargetPort: intstr.FromInt(ZookeeperClientPort),
 		Protocol:   v1.ProtocolTCP,

@@ -3,8 +3,7 @@ package zkcluster
 import (
 	"k8s.io/klog"
 	"sync"
-	api "zookeeper-operator/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/util/k8sutil"
+	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
 )
 
 func (c *Cluster) ReplaceStoppedMembers() error {
@@ -57,7 +56,7 @@ func (c *Cluster) replaceOneStoppedMember(toReplace *api.Member, cluster *api.Me
 	}
 	c.zkCR.Status.Members.Unready.Add(toReplace)
 
-	_, err = c.client.Event().Create(k8sutil.ReplacingDeadMemberEvent(toReplace.Name(), c.zkCR))
+	_, err = c.client.Event().Create(ReplacingDeadMemberEvent(toReplace.Name(), c.zkCR))
 	if err != nil {
 		klog.Errorf("failed to create replacing dead member event: %v", err)
 	}
