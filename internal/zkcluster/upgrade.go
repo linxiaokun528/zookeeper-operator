@@ -16,7 +16,7 @@ package zkcluster
 
 import (
 	"fmt"
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

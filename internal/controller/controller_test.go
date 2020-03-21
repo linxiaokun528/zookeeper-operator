@@ -20,8 +20,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/internal/zkcluster"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
 func TestHandleClusterEventUpdateFailedCluster(t *testing.T) {

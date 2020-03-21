@@ -4,7 +4,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-$GOPATH/pkg/mod/k8s.io/code-generator\@v0.17.2/generate-groups.sh all zookeeper-operator/internal/client zookeeper-operator/internal/apis zookeeper:v1alpha1 --go-header-file hack/k8s/codegen/boilerplate.go.txt --output-base=..
+$GOPATH/pkg/mod/k8s.io/code-generator\@v0.17.2/generate-groups.sh all zookeeper-operator/pkg/client zookeeper-operator/pkg/apis zookeeper:v1alpha1 --go-header-file hack/k8s/codegen/boilerplate.go.txt --output-base=..
 
 # 若用vendor模式，则为：
 # vendor/k8s.io/code-generator/generate-groups.sh all pkg/generated zookeeper-operator/pkg/apis zookeeper:v1alpha1 --go-header-file hack/k8s/codegen/boilerplate.go.txt --output-base=.

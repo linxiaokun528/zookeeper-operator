@@ -26,12 +26,5 @@ import (
 func (c *Cluster) reconfig(hosts []string, desiredConfig []string) error {
 	klog.Infoln("Reconfiguring zookeeper cluster", c.zkCR.Name)
 
-	// TODO: remove this function and this file. Use zookeeperutil.ReconfigureCluster directly.
-	err := zookeeperutil.ReconfigureCluster(hosts, desiredConfig)
-	if err != nil {
-		klog.Infoln("Reconfigure error")
-		return err
-	}
-
-	return nil
+	return zookeeperutil.ReconfigureCluster(hosts, desiredConfig)
 }

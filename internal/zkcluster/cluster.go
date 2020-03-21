@@ -21,8 +21,8 @@ import (
 	"k8s.io/klog"
 	"reflect"
 	"sync"
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/internal/util/k8sclient"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
 type clusterEventType string

@@ -17,13 +17,14 @@ package main
 import (
 	"context"
 	"flag"
-	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
 	"net/http"
 	"os"
 	"runtime"
 	"time"
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/internal/util/k8sclient"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -163,7 +164,6 @@ func initCRDOrDie(client apiextensionsclientv1.CustomResourceDefinitionInterface
 }
 
 func initCRD(client apiextensionsclientv1.CustomResourceDefinitionInterface) error {
-	crd := k8sutil2.NewCRD(client, api.ZookeeperClusterCRDName, api.ZookeeperClusterResourceKind,
-		api.ZookeeperClusterResourcePlural, "zookeeper")
+	crd := k8sutil2.NewCRD(client, apiextensionsv1.NamespaceScoped, api.SchemeGroupVersionKind, api.Plural, api.Short)
 	return crd.CreateAndWait()
 }

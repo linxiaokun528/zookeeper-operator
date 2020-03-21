@@ -17,11 +17,10 @@ package k8sutil
 import (
 	"fmt"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
-
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetretry "k8s.io/client-go/util/retry"
 )
@@ -40,10 +39,12 @@ type crd struct {
 
 func (c *crd) Create() error {
 	customResourceDefinition, err := c.client.Create(c.customResourceDefinition)
+	if err == nil {
+		c.customResourceDefinition = customResourceDefinition
+	}
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
-	c.customResourceDefinition = customResourceDefinition
 	return nil
 }
 
@@ -81,7 +82,7 @@ func (c *crd) Wait() error {
 func (c *crd) CreateAndWait() error {
 	err := c.Create()
 	if err != nil {
-		return nil
+		return err
 	}
 
 	return c.Wait()
@@ -91,17 +92,25 @@ func (c *crd) CustomResourceDefinition() *apiextensionsv1.CustomResourceDefiniti
 	return c.customResourceDefinition
 }
 
-func NewCRD(client apiextensionsclientv1.CustomResourceDefinitionInterface, crdName, rkind, rplural, shortName string) CRD {
+func NewCRD(client apiextensionsclientv1.CustomResourceDefinitionInterface, scope apiextensionsv1.ResourceScope,
+	gvk schema.GroupVersionKind, plural, shortName string) CRD {
 	customResourceDefinition := &apiextensionsv1.CustomResourceDefinition{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: crdName,
+			Name: plural + "." + gvk.Group,
 		},
 		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: api.SchemeGroupVersion.Group,
-			Scope: apiextensionsv1.NamespaceScoped,
+			Group: gvk.Group,
+			Scope: scope,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    gvk.Version,
+					Served:  true,
+					Storage: true,
+				},
+			},
 			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Plural: rplural,
-				Kind:   rkind,
+				Plural: plural,
+				Kind:   gvk.Kind,
 			},
 		},
 	}

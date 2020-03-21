@@ -4,7 +4,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog"
 	"sync"
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
 func (c *Cluster) scaleDown() error {

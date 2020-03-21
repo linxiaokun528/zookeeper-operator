@@ -4,9 +4,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/runtime"
 	"time"
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/internal/util/k8sclient"
 	"zookeeper-operator/internal/zkcluster"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/informer"
 )
 

@@ -18,8 +18,7 @@ type ConsumingQueue struct {
 	workqueue.RateLimitingInterface
 	consumer Consumer
 
-	stopCh chan struct{}
-	wait   sync.WaitGroup
+	wait sync.WaitGroup
 }
 
 func NewConsumingQueue(queue workqueue.RateLimitingInterface, consumer Consumer) *ConsumingQueue {
@@ -30,11 +29,12 @@ func NewConsumingQueue(queue workqueue.RateLimitingInterface, consumer Consumer)
 	}
 }
 
-func (c *ConsumingQueue) Consume(consumerNum int) {
+func (c *ConsumingQueue) Start(consumerNum int, stopCh <-chan struct{}) {
 	c.wait.Add(consumerNum)
 	for i := 0; i < consumerNum; i++ {
-		go wait.Until(c.worker, time.Second, c.stopCh)
+		go wait.Until(c.worker, time.Second, stopCh)
 	}
+	<-stopCh
 }
 
 func (c *ConsumingQueue) worker() {
@@ -67,7 +67,6 @@ func (c *ConsumingQueue) processNextWorkItem() bool {
 }
 
 func (c *ConsumingQueue) ShutDown() {
-	close(c.stopCh)
 	c.RateLimitingInterface.ShutDown()
 	c.wait.Wait()
 }
@@ -123,8 +122,8 @@ func (e *eventConsumingQueue) Done(resource_event *event) {
 	e.queue.Done(e.encode(resource_event))
 }
 
-func (e *eventConsumingQueue) Consume(consumerNum int) {
-	e.queue.Consume(consumerNum)
+func (e *eventConsumingQueue) Start(consumerNum int, stopCh <-chan struct{}) {
+	e.queue.Start(consumerNum, stopCh)
 }
 
 func (e *eventConsumingQueue) wrapConsumer(obj interface{}) (bool, error) {

@@ -21,17 +21,20 @@ import (
 )
 
 const (
-	ZookeeperClusterResourceKind   = "ZookeeperCluster"
-	ZookeeperClusterResourcePlural = "zookeeperclusters"
-	groupName                      = "zookeeper.database.apache.com"
+	Kind      = "ZookeeperCluster"
+	Plural    = "zookeeperclusters"
+	Short     = "zookeeper"
+	GroupName = "zookeeper.database.apache.com"
+	Version   = "v1alpha1"
 )
 
 var (
 	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 	AddToScheme   = SchemeBuilder.AddToScheme
 
-	SchemeGroupVersion      = schema.GroupVersion{Group: groupName, Version: "v1alpha1"}
-	ZookeeperClusterCRDName = ZookeeperClusterResourcePlural + "." + groupName
+	SchemeGroupVersionKind = schema.GroupVersionKind{Group: GroupName, Version: Version,
+		Kind: Kind}
+	SchemeGroupVersion = SchemeGroupVersionKind.GroupVersion()
 )
 
 // Resource gets an ZookeeperCluster GroupResource for a specified resource
@@ -41,10 +44,10 @@ func Resource(resource string) schema.GroupResource {
 
 // addKnownTypes adds the set of types defined in this package to the supplied scheme.
 func addKnownTypes(s *runtime.Scheme) error {
-	s.AddKnownTypes(SchemeGroupVersion,
+	s.AddKnownTypes(SchemeGroupVersionKind.GroupVersion(),
 		&ZookeeperCluster{},
 		&ZookeeperClusterList{},
 	)
-	metav1.AddToGroupVersion(s, SchemeGroupVersion)
+	metav1.AddToGroupVersion(s, SchemeGroupVersionKind.GroupVersion())
 	return nil
 }

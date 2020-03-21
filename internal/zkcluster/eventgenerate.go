@@ -19,8 +19,8 @@ import (
 	"os"
 	"time"
 
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/internal/util/constants"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,7 +67,7 @@ func newClusterEvent(cl *api.ZookeeperCluster) *v1.Event {
 		},
 		InvolvedObject: v1.ObjectReference{
 			APIVersion:      api.SchemeGroupVersion.String(),
-			Kind:            api.ZookeeperClusterResourceKind,
+			Kind:            api.Kind,
 			Name:            cl.Name,
 			Namespace:       cl.Namespace,
 			UID:             cl.UID,

@@ -6,7 +6,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog"
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 )
 

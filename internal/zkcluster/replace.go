@@ -3,7 +3,7 @@ package zkcluster
 import (
 	"k8s.io/klog"
 	"sync"
-	api "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
 func (c *Cluster) ReplaceStoppedMembers() error {

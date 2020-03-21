@@ -16,12 +16,13 @@ package k8sclient
 
 import (
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
+	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"zookeeper-operator/internal/client/clientset/versioned"
-	"zookeeper-operator/internal/client/clientset/versioned/typed/zookeeper/v1alpha1"
+	"zookeeper-operator/pkg/client/clientset/versioned"
+	"zookeeper-operator/pkg/client/clientset/versioned/typed/zookeeper/v1alpha1"
 )
 
 func NewClientOrDie(masterURL string, kubeconfigPath string) Client {
@@ -30,6 +31,7 @@ func NewClientOrDie(masterURL string, kubeconfigPath string) Client {
 		panic(err)
 	}
 	return &clientsets{
+		config:    cfg,
 		kubeCli:   kubernetes.NewForConfigOrDie(cfg),
 		apiExtCli: apiextensionsclient.NewForConfigOrDie(cfg),
 		zkCli:     versioned.NewForConfigOrDie(cfg),
@@ -38,6 +40,8 @@ func NewClientOrDie(masterURL string, kubeconfigPath string) Client {
 
 // Maybe use sigs.k8s.io/controller-runtime/pkg/manager instead
 type Client interface {
+	GetConfig() *rest.Config
+
 	GetCRClient(namespace string) CRClient
 	GetCRDClient() apiextensionsclientv1.CustomResourceDefinitionInterface
 
@@ -47,9 +51,14 @@ type Client interface {
 }
 
 type clientsets struct {
+	config    *rest.Config
 	kubeCli   kubernetes.Interface
 	apiExtCli apiextensionsclient.Interface
 	zkCli     versioned.Interface
+}
+
+func (c *clientsets) GetConfig() *rest.Config {
+	return c.config
 }
 
 func (c *clientsets) GetCRClient(namespace string) CRClient {
@@ -62,7 +71,7 @@ func (c *clientsets) GetCRClient(namespace string) CRClient {
 }
 
 func (c *clientsets) GetCRDClient() apiextensionsclientv1.CustomResourceDefinitionInterface {
-	return c.apiExtCli.ApiextensionsV1().CustomResourceDefinitions()
+	return c.apiExtCli.ApiextensionsV1beta1().CustomResourceDefinitions()
 }
 
 func (c *clientsets) ZookeeperInterface() versioned.Interface {

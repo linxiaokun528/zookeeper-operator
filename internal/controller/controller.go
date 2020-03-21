@@ -16,12 +16,13 @@ package controller
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"time"
-	v1alpha1 "zookeeper-operator/internal/apis/zookeeper/v1alpha1"
-	zkInformers "zookeeper-operator/internal/client/informers/externalversions"
 	"zookeeper-operator/internal/util/k8sclient"
+	"zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/informer"
 )
 
@@ -40,19 +41,30 @@ func New(client k8sclient.Client) *Controller {
 func (c *Controller) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
-	resourceSyncer := c.newResourceSyncerForZookeeper()
-	resourceSyncer.Run(ctx, 5)
+	resourceSyncer := c.newResourceSyncerForZookeeper(ctx)
+	resourceSyncer.Run(5, ctx.Done())
 
 	// TODO: add a pod informer to watch related pods
 }
 
-func (c *Controller) newResourceSyncerForZookeeper() *informer.ResourceSyncer {
-	sharedInformerFactory := zkInformers.NewSharedInformerFactory(c.client.ZookeeperInterface(), time.Minute*2)
+func (c *Controller) newResourceSyncerForZookeeper(ctx context.Context) informer.ResourceSyncer {
+	scheme := runtime.NewScheme()
+	err := clientgoscheme.AddToScheme(scheme)
+	if err != nil {
+		panic(err)
+	}
+	err = v1alpha1.AddToScheme(scheme)
+	if err != nil {
+		panic(err)
+	}
 
-	zkInformer := sharedInformerFactory.Zookeeper().V1alpha1().ZookeeperClusters().Informer()
-	groupVersionResource := v1alpha1.SchemeGroupVersion.WithResource("zookeeperclusters")
+	factory, err := informer.NewResourceSyncerFactory(c.client.GetConfig(), scheme, nil)
+	if err != nil {
+		panic(err)
+	}
+	go factory.Start(ctx.Done())
 
-	resourceSyncer := informer.NewResourceSyncer(zkInformer, &groupVersionResource,
+	resourceSyncer := factory.ResourceSyncer(&v1alpha1.ZookeeperCluster{},
 		func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) informer.Syncer {
 			zkSyncer := zookeeperSyncer{
 				adder:  adder,
