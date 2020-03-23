@@ -50,11 +50,14 @@ func New(client k8sclient.CRClient, zkCR *api.ZookeeperCluster) *Cluster {
 	return c
 }
 
-func (c *Cluster) SyncAndUpdateStatus() error {
+func (c *Cluster) SyncAndUpdateStatus() (err error) {
 	origin := c.zkCR.Status.DeepCopy()
 	defer func() {
 		if !reflect.DeepEqual(origin, c.zkCR.Status) {
-			c.updateStatus()
+			update_err := c.updateStatus()
+			if err == nil && update_err != nil {
+				err = update_err
+			}
 		}
 	}()
 	return c.sync()
@@ -122,7 +125,11 @@ func (c *Cluster) sync() error {
 	} else if c.zkCR.Status.Members.Running.Size() > c.zkCR.Spec.Size {
 		c.zkCR.Status.AppendScalingDownCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
 
-		return c.scaleDown()
+		err = c.scaleDown()
+		if err == nil {
+			c.zkCR.Status.SetRunningCondition()
+		}
+		return err
 	}
 
 	if c.zkCR.Status.GetCurrentCondition().Type == api.ClusterScalingUp {

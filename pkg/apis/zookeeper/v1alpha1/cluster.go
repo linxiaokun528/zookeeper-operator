@@ -78,6 +78,7 @@ func (c *ZookeeperCluster) UnmarshalJSON(b []byte) error {
 	if c.Status.Members != nil {
 		clusterID := clusterID{namespace: c.Namespace, clusterName: c.Name}
 		c.Status.Members.setClusterID(&clusterID)
+		c.Status.Members.version = c.Status.CurrentVersion
 	}
 
 	return nil

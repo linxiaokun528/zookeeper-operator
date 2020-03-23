@@ -46,7 +46,8 @@ func (c *Cluster) syncCurrentMembers() (err error) {
 	}
 	running_pods, unready_pods, stopped_pods := k8sutil2.GetPodsSeparatedByStatus(pods)
 
-	c.zkCR.Status.Members = api.NewZKCluster(c.zkCR.Namespace, c.zkCR.Name, running_pods, unready_pods, stopped_pods)
+	c.zkCR.Status.Members = api.NewZKCluster(c.zkCR.Namespace, c.zkCR.Name, c.zkCR.Status.CurrentVersion, running_pods,
+		unready_pods, stopped_pods)
 
 	return nil
 }

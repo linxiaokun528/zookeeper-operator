@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -30,27 +31,30 @@ type ResourceSyncerFactory interface {
 }
 
 type resourceSyncerFactory struct {
-	config *rest.Config
-	cache  sigcache.Cache
-	scheme *runtime.Scheme
+	config     *rest.Config
+	cache      sigcache.Cache
+	restMapper meta.RESTMapper
+	scheme     *runtime.Scheme
 }
 
 func (r *resourceSyncerFactory) ResourceSyncer(obj runtime.Object,
 	newSyncerFunc NewSyncerFunc) ResourceSyncer {
-	i, err := r.cache.GetInformer(obj)
-	if err != nil {
-		panic(err)
-	}
 
 	gvk, err := apiutil.GVKForObject(obj, r.scheme)
 	if err != nil {
 		panic(err)
 	}
-	gvr := schema.GroupVersionResource{
-		Group:    gvk.Group,
-		Version:  gvk.Version,
-		Resource: gvk.Kind,
+	mapping, err := r.restMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		panic(err)
 	}
+	gvr := mapping.Resource
+
+	i, err := r.cache.GetInformer(obj)
+	if err != nil {
+		panic(err)
+	}
+
 	return newResourceSyncer(i, gvr, newSyncerFunc)
 }
 
@@ -70,7 +74,12 @@ func NewResourceSyncerFactory(config *rest.Config, scheme *runtime.Scheme,
 		return nil, err
 	}
 
-	return &resourceSyncerFactory{config: config, cache: cache, scheme: scheme}, nil
+	restMapper, err := apiutil.NewDiscoveryRESTMapper(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &resourceSyncerFactory{config: config, cache: cache, scheme: scheme, restMapper: restMapper}, nil
 }
 
 type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) Syncer
@@ -83,7 +92,7 @@ type resourceSyncer struct {
 	eventQueue *eventConsumingQueue
 	syncer     Syncer
 
-	gvk      schema.GroupVersionResource
+	gvr      schema.GroupVersionResource
 	informer sigcache.Informer
 	lister   cache.GenericLister
 }
@@ -94,7 +103,7 @@ func newResourceSyncer(informer sigcache.Informer, gvr schema.GroupVersionResour
 	lister := cache.NewGenericLister(informer.(cache.SharedIndexInformer).GetIndexer(), gvr.GroupResource())
 
 	result := resourceSyncer{
-		gvk:      gvr,
+		gvr:      gvr,
 		informer: informer,
 		lister:   lister,
 	}
@@ -122,7 +131,7 @@ func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
 	defer i.eventQueue.ShutDown()
 
 	if !cache.WaitForNamedCacheSync(
-		fmt.Sprintf("%v", i.gvk),
+		fmt.Sprintf("%v", i.gvr),
 		context.TODO().Done(), i.informer.HasSynced) {
 		return
 	}
@@ -186,7 +195,7 @@ func (i *resourceSyncer) consume(item interface{}) (bool, error) {
 		return i.syncer.Delete(obj)
 	} else {
 		if err != nil {
-			return false, errors.NewNotFound(i.gvk.GroupResource(), name)
+			return false, errors.NewNotFound(i.gvr.GroupResource(), name)
 		}
 		if obj.(metav1.Object).GetDeletionTimestamp() != nil {
 			return true, nil

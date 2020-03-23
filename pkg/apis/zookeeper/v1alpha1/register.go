@@ -18,10 +18,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"reflect"
 )
 
 const (
-	Kind      = "ZookeeperCluster"
 	Plural    = "zookeeperclusters"
 	Short     = "zookeeper"
 	GroupName = "zookeeper.database.apache.com"
@@ -31,6 +31,7 @@ const (
 var (
 	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 	AddToScheme   = SchemeBuilder.AddToScheme
+	Kind          = reflect.TypeOf(ZookeeperCluster{}).Name()
 
 	SchemeGroupVersionKind = schema.GroupVersionKind{Group: GroupName, Version: Version,
 		Kind: Kind}

@@ -125,7 +125,6 @@ func (ms *Members) GetElements() []*Member {
 
 func (ms *Members) Add(m *Member) {
 	if m.clusterID != ms.clusterID {
-		fmt.Print(123)
 		panic(fmt.Sprintf("Add a member of %s to members of %s",
 			m.clusterID.stringWithPointAddr(), ms.clusterID.stringWithPointAddr()))
 	}
@@ -242,18 +241,20 @@ func (ms *Members) setClusterID(id *clusterID) {
 
 type ZKCluster struct {
 	*clusterID `json:omit`
+	version    string  `json:"omit"`
 	Running    Members `json:"running"`
 	Unready    Members `json:"unready"`
 	Stopped    Members `json:"stopped"`
 }
 
-func NewZKCluster(namespace, cluster_name string, runningPods, unreadyPods, stoppedPods []*v1.Pod) *ZKCluster {
+func NewZKCluster(namespace, cluster_name, version string, runningPods, unreadyPods, stoppedPods []*v1.Pod) *ZKCluster {
 	id := &clusterID{
 		clusterName: cluster_name,
 		namespace:   namespace,
 	}
 	return &ZKCluster{
 		clusterID: id,
+		version:   version,
 		Running:   podsToMembers(id, runningPods),
 		Unready:   podsToMembers(id, unreadyPods),
 		Stopped:   podsToMembers(id, stoppedPods),
@@ -347,6 +348,7 @@ func (z *ZKCluster) addOneMember() *Member {
 	m := Member{
 		id:        z.nextMemberID(),
 		clusterID: z.clusterID,
+		version:   z.version,
 	}
 	z.Unready.Add(&m)
 	return &m

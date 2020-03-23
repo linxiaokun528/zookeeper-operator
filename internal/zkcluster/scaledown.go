@@ -51,7 +51,7 @@ func (c *Cluster) scaleDown() error {
 func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 	if err := c.client.Pod().Delete(m.Name(), nil); err != nil {
 		if err != nil {
-			if apierrors.IsNotFound(err) {
+			if !apierrors.IsNotFound(err) {
 				return err
 			}
 		}
@@ -71,6 +71,6 @@ func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 		klog.Errorf("failed to create remove member event: %v", err)
 	}
 
-	klog.Infof("removed member (%v) with ID (%d)", m.Name, m.ID())
+	klog.Infof("Zookeeper member (%v) is removed", m.Name())
 	return nil
 }
