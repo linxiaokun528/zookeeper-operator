@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -15,6 +14,7 @@ import (
 	"k8s.io/klog"
 	sigcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"strings"
 	"time"
 )
 
@@ -31,10 +31,9 @@ type ResourceSyncerFactory interface {
 }
 
 type resourceSyncerFactory struct {
-	config     *rest.Config
-	cache      sigcache.Cache
-	restMapper meta.RESTMapper
-	scheme     *runtime.Scheme
+	config *rest.Config
+	cache  sigcache.Cache
+	scheme *runtime.Scheme
 }
 
 func (r *resourceSyncerFactory) ResourceSyncer(obj runtime.Object,
@@ -44,11 +43,12 @@ func (r *resourceSyncerFactory) ResourceSyncer(obj runtime.Object,
 	if err != nil {
 		panic(err)
 	}
-	mapping, err := r.restMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-	if err != nil {
-		panic(err)
+
+	gvr := schema.GroupVersionResource{
+		Group:    gvk.Group,
+		Version:  gvk.Version,
+		Resource: strings.ToLower(gvk.Kind),
 	}
-	gvr := mapping.Resource
 
 	i, err := r.cache.GetInformer(obj)
 	if err != nil {
@@ -74,12 +74,7 @@ func NewResourceSyncerFactory(config *rest.Config, scheme *runtime.Scheme,
 		return nil, err
 	}
 
-	restMapper, err := apiutil.NewDiscoveryRESTMapper(config)
-	if err != nil {
-		return nil, err
-	}
-
-	return &resourceSyncerFactory{config: config, cache: cache, scheme: scheme, restMapper: restMapper}, nil
+	return &resourceSyncerFactory{config: config, cache: cache, scheme: scheme}, nil
 }
 
 type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) Syncer

@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/runtime"
 	"time"
 	"zookeeper-operator/internal/util/k8sclient"
@@ -13,7 +12,6 @@ import (
 type zookeeperSyncer struct {
 	adder  informer.ResourceRateLimitingAdder
 	client k8sclient.Client
-	logger *logrus.Entry
 }
 
 func (z *zookeeperSyncer) sync(obj runtime.Object) (bool, error) {
