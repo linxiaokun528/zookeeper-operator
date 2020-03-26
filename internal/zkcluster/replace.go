@@ -6,8 +6,14 @@ import (
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
-func (c *Cluster) ReplaceStoppedMembers() error {
-	klog.Infof("Some members are stopped: (%v)", c.zkCR.Status.Members.Stopped.GetMemberNames())
+func (c *Cluster) ReplaceStoppedMembers() (err error) {
+	klog.Infof("Replacing stopped members for %v: %v...", c.zkCR.GetFullName(), c.zkCR.Status.Members.Stopped)
+	defer func() {
+		if err == nil {
+			klog.Infof("Stopped members for %v are successfully replaced: %v",
+				c.zkCR.GetFullName(), c.zkCR.Status.Members.Stopped)
+		}
+	}()
 
 	all := c.zkCR.Status.Members.Running.Copy()
 	all.Update(&c.zkCR.Status.Members.Stopped)
@@ -28,7 +34,7 @@ func (c *Cluster) ReplaceStoppedMembers() error {
 	wait.Wait()
 
 	select {
-	case err := <-errCh:
+	case err = <-errCh:
 		// all errors have been reported before, we only need to inform the controller that there was an error and it should re-try this job once more next time.
 		if err != nil {
 			return err

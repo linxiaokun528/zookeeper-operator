@@ -50,20 +50,17 @@ func GetClusterConfig(hosts []string) ([]string, error) {
 func ReconfigureCluster(hosts []string, desiredConfig []string) error {
 	conn, _, err := zk.Connect(hosts, time.Second)
 	if err != nil {
-		klog.Error("Failed to connect to ZK hosts: ", hosts)
+		klog.Errorf("Failed to connect to zookeeper hosts: %v", hosts)
 		return err
 	}
 	defer conn.Close()
-	klog.Info("Pushing reconfig to zookeeper", desiredConfig)
+	klog.V(4).Infof("Pushing reconfig %v to zookeeper hosts: %v", desiredConfig, hosts)
 	_, err = conn.Reconfig(desiredConfig, -1)
 
 	if err != nil {
-		// TODO: use the same logger in all the operator
-		klog.Error("Failed to push reconfig", hosts, desiredConfig)
+		klog.Error("Failed to push reconfig %v to zookeeper hosts: %v", desiredConfig, hosts)
 		return err
 	}
 
 	return nil
-
-	//return []string{""},nil
 }

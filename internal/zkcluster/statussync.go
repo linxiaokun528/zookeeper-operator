@@ -40,6 +40,13 @@ func (c *Cluster) listPods() (pods []*v1.Pod, err error) {
 }
 
 func (c *Cluster) syncCurrentMembers() (err error) {
+	klog.V(4).Infof("Syncing zookeeper members for %v...", c.zkCR.GetFullName())
+	defer func() {
+		if err == nil {
+			klog.V(4).Infof("Zookeeper members for %v synced successfully", c.zkCR.GetFullName())
+		}
+	}()
+
 	pods, err := c.listPods()
 	if err != nil {
 		return err

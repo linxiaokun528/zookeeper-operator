@@ -15,7 +15,6 @@
 package zkcluster
 
 import (
-	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetretry "k8s.io/client-go/util/retry"
 	"k8s.io/klog"
@@ -24,13 +23,6 @@ import (
 	"zookeeper-operator/internal/util/k8sclient"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
-
-type clusterEventType string
-
-type clusterEvent struct {
-	typ     clusterEventType
-	cluster *api.ZookeeperCluster
-}
 
 type Cluster struct {
 	client k8sclient.CRClient
@@ -82,6 +74,9 @@ func (c *Cluster) updateStatus() error {
 }
 
 func (c *Cluster) sync() error {
+	klog.Infof("Start syncing zookeeper cluster %v", c.zkCR.GetFullName())
+	defer klog.Infof("Finish syncing zookeeper cluster %v", c.zkCR.GetFullName())
+
 	if c.zkCR.Status.StartTime == nil {
 		now := metav1.Now()
 		c.zkCR.Status.StartTime = &now
@@ -101,27 +96,32 @@ func (c *Cluster) sync() error {
 	}
 
 	defer func() {
-		// TODO: it's not correct
+		// TODO: it's not always correct
 		c.zkCR.Status.Size = c.zkCR.Status.Members.Running.Size()
 	}()
 
 	if c.zkCR.Status.Members.Unready.Size() > 0 {
-		klog.Infof(fmt.Sprintf("skip reconciliation: running (%v), unready (%v)",
-			c.zkCR.Status.Members.Running.GetMemberNames(), c.zkCR.Status.Members.Unready.GetMemberNames()))
+		klog.Infof("Skip syncing for zookeeper cluster %v. Some pods are unready: %v",
+			c.zkCR.GetFullName(), c.zkCR.Status.Members.Unready.GetMemberNames())
 		ReconcileFailed.WithLabelValues("not all pods are ready").Inc()
 		return nil
 	}
 
 	if c.zkCR.Status.Members.Stopped.Size() > 0 {
 		c.zkCR.Status.AppendRecoveringCondition(&c.zkCR.Status.Members.Stopped)
-		c.ReplaceStoppedMembers()
-		return fmt.Errorf("Some members are stopped: (%v)", c.zkCR.Status.Members.Stopped.GetMemberNames())
+		klog.Warningf("There are stopped members of zookeeper cluster %v: %v",
+			c.zkCR.GetFullName(), c.zkCR.Status.Members.Stopped)
+		err = c.ReplaceStoppedMembers()
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 
 	if c.zkCR.Status.Members.Running.Size() < c.zkCR.Spec.Size {
 		c.zkCR.Status.AppendScalingUpCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
 
-		return c.scaleUp()
+		return c.beginScaleUp()
 	} else if c.zkCR.Status.Members.Running.Size() > c.zkCR.Spec.Size {
 		c.zkCR.Status.AppendScalingDownCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
 
@@ -133,19 +133,24 @@ func (c *Cluster) sync() error {
 	}
 
 	if c.zkCR.Status.GetCurrentCondition().Type == api.ClusterScalingUp {
-		err = c.reconfig(c.zkCR.Status.Members.Running.GetClientHosts(),
-			c.zkCR.Status.Members.Running.GetClusterConfig())
+		err := c.finishScaleUp()
 		if err != nil {
 			return err
 		}
+		c.zkCR.Status.SetRunningCondition()
 	}
 
-	if c.needUpgrade() {
+	// TODO: upgrade hasn't been tested yet
+	if c.zkCR.Spec.Version != c.zkCR.Status.CurrentVersion && c.zkCR.Status.TargetVersion == api.Empty {
 		c.zkCR.Status.AppendUpgradingCondition(c.zkCR.Spec.Version)
-		c.zkCR.Status.UpgradeVersionTo(c.zkCR.Spec.Version)
-
-		m := c.pickOneOldMember()
-		return c.upgradeOneMember(m.Name())
+		c.beginUpgrade()
+	}
+	if c.zkCR.Status.TargetVersion != api.Empty {
+		return c.upgradeOneMember()
+	}
+	if c.zkCR.Spec.Version != c.zkCR.Status.CurrentVersion && c.pickOneOldMember() == nil {
+		c.finishUpgrade()
+		c.zkCR.Status.SetRunningCondition()
 	}
 
 	c.zkCR.Status.SetRunningCondition()

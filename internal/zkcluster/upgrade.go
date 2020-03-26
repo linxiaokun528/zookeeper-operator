@@ -23,6 +23,18 @@ import (
 	"k8s.io/klog"
 )
 
+func (c *Cluster) beginUpgrade() {
+	klog.Infof("Upgrading zookeeper cluster %v from %s to %s...",
+		c.zkCR.GetFullName(), c.zkCR.Status.CurrentVersion, c.zkCR.Spec.Version)
+	c.zkCR.Status.UpgradeVersionTo(c.zkCR.Spec.Version)
+}
+
+func (c *Cluster) finishUpgrade() {
+	c.zkCR.Status.SetVersion(c.zkCR.Status.TargetVersion)
+	klog.Infof("Zookeeper cluster %v upgraded from %s to %s successfully.",
+		c.zkCR.GetFullName(), c.zkCR.Status.CurrentVersion, c.zkCR.Status.TargetVersion)
+}
+
 func (c *Cluster) pickOneOldMember() *api.Member {
 	for _, member := range c.zkCR.Status.Members.Running.GetElements() {
 		if member.Version() == c.zkCR.Spec.Version {
@@ -33,30 +45,25 @@ func (c *Cluster) pickOneOldMember() *api.Member {
 	return nil
 }
 
-func (c *Cluster) needUpgrade() bool {
-	return c.zkCR.Status.Members.Running.Size() == c.zkCR.Spec.Size && c.pickOneOldMember() != nil
+func (c *Cluster) upgradeOneMember() error {
+	member := c.pickOneOldMember()
+	if member == nil {
+		return nil
+	}
+	return c.upgradeMember(member.Name())
 }
 
-func (c *Cluster) upgradeOneMember(memberName string) error {
-	c.zkCR.Status.AppendUpgradingCondition(c.zkCR.Spec.Version)
-
+func (c *Cluster) upgradeMember(memberName string) error {
 	pod, err := c.client.Pod().Get(memberName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("fail to get pod (%s): %v", memberName, err)
 	}
 	oldpod := pod.DeepCopy()
 
-	klog.Infof("upgrading the zookeeper member %v from %s to %s", memberName, getZookeeperVersion(pod), c.zkCR.Spec.Version)
+	klog.Infof("Upgrading the zookeeper member %v from %s to %s", memberName, getZookeeperVersion(pod), c.zkCR.Spec.Version)
 	pod.Spec.Containers[0].Image = k8sutil2.ImageName(c.zkCR.Spec.Repository, c.zkCR.Spec.Version)
 	setZookeeperVersion(pod, c.zkCR.Spec.Version)
 
-	//patchdata, err := k8sclient.CreatePatch(oldpod, pod, v1.Pod{})
-	//if err != nil {
-	//	return fmt.Errorf("error creating patch: %v", err)
-	//}
-	//
-	//_, err = c.zkclient.Pod().Patch(pod.GetName(), types.StrategicMergePatchType, patchdata)
-	// TODO: Use retry mechanism
 	_, err = c.client.Pod().Update(pod)
 	if err != nil {
 		return fmt.Errorf("fail to update the zookeeper member (%s): %v", memberName, err)

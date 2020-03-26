@@ -7,12 +7,20 @@ import (
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
-func (c *Cluster) scaleDown() error {
+func (c *Cluster) scaleDown() (err error) {
+	klog.Infof("Scaling down zookeeper cluster %v(current cluster size: %d, desired cluster size: %d)...",
+		c.zkCR.GetFullName(), c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
+	defer func() {
+		if err == nil {
+			klog.Infof("Zookeeper cluster %v scaled down successfully", c.zkCR.GetFullName())
+		}
+	}()
+
 	diff := c.zkCR.Status.Members.Running.Size() - c.zkCR.Spec.Size
 
 	membersToRemove := c.zkCR.Status.Members.RemoveMembers(diff)
 
-	err := c.reconfig(c.zkCR.Status.Members.Running.GetClientHosts(), c.zkCR.Status.Members.Running.GetClusterConfig())
+	err = c.reconfig()
 	if err != nil {
 		c.zkCR.Status.Members.Running.Update(membersToRemove)
 		return err
@@ -36,7 +44,7 @@ func (c *Cluster) scaleDown() error {
 	wait.Wait()
 
 	select {
-	case err := <-errCh:
+	case err = <-errCh:
 		// all errors have been reported before, we only need to inform the controller that there was an error and it should re-try this once more next time.
 		if err != nil {
 			return err

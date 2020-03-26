@@ -23,8 +23,16 @@ import (
 //	return !reflect.DeepEqual(expectedConfig, actualConfig), nil
 //}
 
-func (c *Cluster) reconfig(hosts []string, desiredConfig []string) error {
-	klog.Infoln("Reconfiguring zookeeper cluster", c.zkCR.Name)
+func (c *Cluster) reconfig() (err error) {
+	klog.Infof("Reconfiguring zookeeper cluster %s: %v",
+		c.zkCR.GetFullName(), c.zkCR.Status.Members.Running.GetClusterConfig())
+	defer func() {
+		if err == nil {
+			klog.Infof("Zookeeper cluster %s are successfully reconfigured: %v",
+				c.zkCR.GetFullName(), c.zkCR.Status.Members.Running.GetClusterConfig())
+		}
+	}()
 
-	return zookeeperutil.ReconfigureCluster(hosts, desiredConfig)
+	return zookeeperutil.ReconfigureCluster(c.zkCR.Status.Members.Running.GetClientHosts(),
+		c.zkCR.Status.Members.Running.GetClusterConfig())
 }

@@ -37,7 +37,7 @@ func (c *clusterID) Namespace() string {
 }
 
 func (c *clusterID) String() string {
-	return fmt.Sprintf("%s(%s)", c.clusterName, c.namespace)
+	return fmt.Sprintf("%s/%s", c.namespace, c.clusterName)
 }
 
 func (c *clusterID) stringWithPointAddr() string {

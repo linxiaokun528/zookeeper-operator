@@ -33,11 +33,17 @@ func (c *Cluster) createService(service *v1.Service) error {
 	return nil
 }
 
-func (c *Cluster) create() error {
-	if err := c.setupServices(); err != nil {
+func (c *Cluster) create() (err error) {
+	c.logClusterCreation()
+	defer func() {
+		if err == nil {
+			klog.Infof("Zookeeper cluster %v created successfully", c.zkCR.GetFullName())
+		}
+	}()
+
+	if err = c.setupServices(); err != nil {
 		return fmt.Errorf("zkCR create: failed to setup service: %v", err)
 	}
-	c.logClusterCreation()
 
 	return nil
 }
@@ -45,10 +51,10 @@ func (c *Cluster) create() error {
 func (c *Cluster) logClusterCreation() {
 	specBytes, err := json.MarshalIndent(c.zkCR.Spec, "", "    ")
 	if err != nil {
-		klog.Errorf("failed to marshal spec of zookeeper cluster %s: %v", c.zkCR.Name, err)
+		klog.Errorf("Failed to marshal spec of zookeeper cluster %s: %v", c.zkCR.Name, err)
 	}
 
-	klog.Info("creating zookeeper cluster %s with Spec:", c.zkCR.Name)
+	klog.Info("Creating zookeeper cluster %s with Spec: ", c.zkCR.Name)
 	for _, m := range strings.Split(string(specBytes), "\n") {
 		klog.Info(m)
 	}

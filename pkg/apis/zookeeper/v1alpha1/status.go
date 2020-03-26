@@ -150,5 +150,5 @@ func newClusterCondition(condType ClusterConditionType, reason, message string) 
 }
 
 func scalingMsg(from, to int) string {
-	return fmt.Sprintf("Current zkcluster size: %d, desired zkcluster size: %d", from, to)
+	return fmt.Sprintf("Current cluster size: %d, desired cluster size: %d", from, to)
 }
