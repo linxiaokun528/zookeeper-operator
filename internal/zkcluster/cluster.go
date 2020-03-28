@@ -22,6 +22,7 @@ import (
 	"sync"
 	"zookeeper-operator/internal/util/k8sclient"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/pkg/errors"
 )
 
 type Cluster struct {
@@ -47,9 +48,7 @@ func (c *Cluster) SyncAndUpdateStatus() (err error) {
 	defer func() {
 		if !reflect.DeepEqual(origin, c.zkCR.Status) {
 			update_err := c.updateStatus()
-			if err == nil && update_err != nil {
-				err = update_err
-			}
+			err = errors.NewCompoundedError(err, update_err)
 		}
 	}()
 	return c.sync()

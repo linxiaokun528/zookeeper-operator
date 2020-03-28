@@ -3,7 +3,7 @@ package informer
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -190,7 +190,7 @@ func (i *resourceSyncer) consume(item interface{}) (bool, error) {
 		return i.syncer.Delete(obj)
 	} else {
 		if err != nil {
-			return false, errors.NewNotFound(i.gvr.GroupResource(), name)
+			return false, apierrors.NewNotFound(i.gvr.GroupResource(), name)
 		}
 		if obj.(metav1.Object).GetDeletionTimestamp() != nil {
 			return true, nil

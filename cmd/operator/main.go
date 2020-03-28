@@ -17,24 +17,26 @@ package main
 import (
 	"context"
 	"flag"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
-	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
 	"net/http"
 	"os"
 	"runtime"
 	"time"
-	"zookeeper-operator/internal/util/k8sclient"
-	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/samuel/go-zookeeper/zk"
+
 	"zookeeper-operator/internal/controller"
 	"zookeeper-operator/internal/util/constants"
+	"zookeeper-operator/internal/util/k8sclient"
 	"zookeeper-operator/internal/util/probe"
 	"zookeeper-operator/internal/version"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
+	k8sutil2 "zookeeper-operator/pkg/k8sutil"
+	"zookeeper-operator/pkg/util"
 
-	"github.com/samuel/go-zookeeper/zk"
 	"k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -71,11 +73,13 @@ func (e *loggerForGoZK) Printf(format string, args ...interface{}) {
 	klog.V(4).Infof(format, args...)
 }
 
-func main() {
+func init() {
 	logs.InitLogs()
 	defer logs.FlushLogs()
 	zk.DefaultLogger = &loggerForGoZK{}
+}
 
+func main() {
 	klog.Infof("zookeeper-operator Version: %v", version.Version)
 	klog.Infof("Git SHA: %s", version.GitSHA)
 	klog.Infof("Go Version: %s", runtime.Version())
@@ -98,8 +102,8 @@ func main() {
 	if !leaderElect {
 		zkController.Run(ctx)
 	} else {
-		namespace := getEnv(constants.EnvOperatorPodNamespace)
-		name := getEnv(constants.EnvOperatorPodName)
+		namespace := util.GetEnvOrDie(constants.EnvOperatorPodNamespace)
+		name := util.GetEnvOrDie(constants.EnvOperatorPodName)
 
 		id, err := os.Hostname()
 		if err != nil {
@@ -136,20 +140,9 @@ func main() {
 	panic("unreachable")
 }
 
-func getEnv(name string) string {
-	value := os.Getenv(name)
-	if len(value) == 0 {
-		klog.Fatalf("must set env (%s)", name)
-	}
-
-	return value
-}
-
 func createRecorder(kubecli kubernetes.Interface, name, namespace string) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
-	// TODO: what does kubecli.CoreV1().RESTClient()).Events(namespace) do?
-	// When an event happend in leader election, will the EventRecorder send an event to k8s?
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(kubecli.CoreV1().RESTClient()).Events(namespace)})
 	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: name})
 }

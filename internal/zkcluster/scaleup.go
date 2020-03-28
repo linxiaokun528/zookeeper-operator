@@ -2,9 +2,12 @@ package zkcluster
 
 import (
 	"fmt"
-	"k8s.io/klog"
 	"sync"
+
+	"k8s.io/klog"
+
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/pkg/errors"
 )
 
 func (c *Cluster) beginScaleUp() (err error) {
@@ -40,17 +43,9 @@ func (c *Cluster) beginScaleUp() (err error) {
 		}(member, all)
 	}
 	wait.Wait()
+	close(errCh)
 
-	select {
-	case err = <-errCh:
-		// all errors have been reported before, we only need to inform the controller that there was an error and it should re-try this once more next time.
-		if err != nil {
-			return err
-		}
-	default:
-	}
-
-	return nil
+	return errors.NewCompoundedErrorFromChan(errCh)
 }
 
 func (c *Cluster) finishScaleUp() (err error) {
@@ -67,13 +62,13 @@ func (c *Cluster) addOneMember(m *api.Member, allClusterMembers *api.Members) er
 	pod := newZookeeperPod(m, allClusterMembers, c.zkCR)
 	_, err := c.client.Pod().Create(pod)
 	if err != nil {
-		return fmt.Errorf("fail to create member's pod (%s): %v", m.Name(), err)
+		return fmt.Errorf("Failed to create member's pod (%s): %v", m.Name(), err)
 	}
 
-	klog.Infof("added member (%s)", m.Name())
+	klog.Infof("Added member (%s)", m.Name())
 	_, err = c.client.Event().Create(NewMemberAddEvent(m.Name(), c.zkCR))
 	if err != nil {
-		klog.Errorf("failed to create new member add event: %v", err)
+		klog.Errorf("Failed to create new member add event: %v", err)
 	}
 	return nil
 }

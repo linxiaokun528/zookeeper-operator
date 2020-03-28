@@ -5,6 +5,7 @@ import (
 	"k8s.io/klog"
 	"sync"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/pkg/errors"
 )
 
 func (c *Cluster) scaleDown() (err error) {
@@ -42,17 +43,9 @@ func (c *Cluster) scaleDown() (err error) {
 		}(m)
 	}
 	wait.Wait()
+	close(errCh)
 
-	select {
-	case err = <-errCh:
-		// all errors have been reported before, we only need to inform the controller that there was an error and it should re-try this once more next time.
-		if err != nil {
-			return err
-		}
-	default:
-	}
-
-	return nil
+	return errors.NewCompoundedErrorFromChan(errCh)
 }
 
 // Remember to reconfig the zookeeper zkCR before invoking this function
