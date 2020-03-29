@@ -19,62 +19,72 @@ import (
 	"os"
 	"time"
 
-	"zookeeper-operator/internal/util/constants"
+	"k8s.io/klog"
+
+	"zookeeper-operator/internal/util/k8sutil"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func NewMemberAddEvent(memberName string, cl *api.ZookeeperCluster) *v1.Event {
-	event := newClusterEvent(cl)
+func (c *Cluster) createEvent(event *v1.Event) error {
+	_, err := c.client.Event().Create(event)
+	if err != nil {
+		klog.Errorf("Failed to create event for \"%s\": %v", event.Message, err)
+	}
+	return err
+}
+
+func (c *Cluster) newMemberAddEvent(memberName string) *v1.Event {
+	event := c.newClusterEvent()
 	event.Type = v1.EventTypeNormal
 	event.Reason = "New Member Added"
-	event.Message = fmt.Sprintf("New member %s added to zkcluster", memberName)
+	event.Message = fmt.Sprintf("New member %s added", memberName)
 	return event
 }
 
-func MemberRemoveEvent(memberName string, cl *api.ZookeeperCluster) *v1.Event {
-	event := newClusterEvent(cl)
+func (c *Cluster) newMemberRemoveEvent(memberName string) *v1.Event {
+	event := c.newClusterEvent()
 	event.Type = v1.EventTypeNormal
 	event.Reason = "Member Removed"
-	event.Message = fmt.Sprintf("Existing member %s removed from the zkcluster", memberName)
+	event.Message = fmt.Sprintf("Existing member %s removed", memberName)
 	return event
 }
 
-func ReplacingDeadMemberEvent(memberName string, cl *api.ZookeeperCluster) *v1.Event {
-	event := newClusterEvent(cl)
+func (c *Cluster) newMemberReplaceEvent(memberName string) *v1.Event {
+	event := c.newClusterEvent()
 	event.Type = v1.EventTypeNormal
 	event.Reason = "Replacing Dead Member"
-	event.Message = fmt.Sprintf("The dead member %s is being replaced", memberName)
+	event.Message = fmt.Sprintf("Dead member %s replaced", memberName)
 	return event
 }
 
-func MemberUpgradedEvent(memberName, oldVersion, newVersion string, cl *api.ZookeeperCluster) *v1.Event {
-	event := newClusterEvent(cl)
+func (c *Cluster) newMemberUpgradedEvent(memberName, oldVersion, newVersion string) *v1.Event {
+	event := c.newClusterEvent()
 	event.Type = v1.EventTypeNormal
 	event.Reason = "Member Upgraded"
 	event.Message = fmt.Sprintf("Member %s upgraded from %s to %s ", memberName, oldVersion, newVersion)
 	return event
 }
 
-func newClusterEvent(cl *api.ZookeeperCluster) *v1.Event {
+func (c *Cluster) newClusterEvent() *v1.Event {
 	t := time.Now()
 	return &v1.Event{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: cl.Name + "-",
-			Namespace:    cl.Namespace,
+			GenerateName: c.zkCR.Name + "-",
+			Namespace:    c.zkCR.Namespace,
 		},
 		InvolvedObject: v1.ObjectReference{
 			APIVersion:      api.SchemeGroupVersion.String(),
 			Kind:            api.Kind,
-			Name:            cl.Name,
-			Namespace:       cl.Namespace,
-			UID:             cl.UID,
-			ResourceVersion: cl.ResourceVersion,
+			Name:            c.zkCR.Name,
+			Namespace:       c.zkCR.Namespace,
+			UID:             c.zkCR.UID,
+			ResourceVersion: c.zkCR.ResourceVersion,
 		},
 		Source: v1.EventSource{
-			Component: os.Getenv(constants.EnvOperatorPodName),
+			Component: os.Getenv(k8sutil.EnvOperatorPodName),
 		},
 		// Each zkcluster event is unique so it should not be collapsed with other events
 		FirstTimestamp: metav1.Time{Time: t},

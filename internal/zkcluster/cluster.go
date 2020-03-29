@@ -15,25 +15,25 @@
 package zkcluster
 
 import (
+	"reflect"
+	"sync"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetretry "k8s.io/client-go/util/retry"
 	"k8s.io/klog"
-	"reflect"
-	"sync"
-	"zookeeper-operator/internal/util/k8sclient"
+
+	client2 "zookeeper-operator/internal/client"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/errors"
 )
 
 type Cluster struct {
-	client k8sclient.CRClient
-
-	zkCR *api.ZookeeperCluster
-
+	client client2.CRClient
+	zkCR   *api.ZookeeperCluster
 	locker sync.Locker
 }
 
-func New(client k8sclient.CRClient, zkCR *api.ZookeeperCluster) *Cluster {
+func New(client client2.CRClient, zkCR *api.ZookeeperCluster) *Cluster {
 	c := &Cluster{
 		client: client,
 		zkCR:   zkCR,
@@ -63,10 +63,10 @@ func (c *Cluster) updateStatus() error {
 
 		new.Status = c.zkCR.Status
 		// We are supposed to use UpdateStatus here. But we don't have a status resource yet.
-		// TODO: add a value to the status in CRD
+		// TODO: add a default value to the status in CRD
 		new, err = c.client.ZookeeperCluster().Update(new)
 		if err != nil {
-			klog.Warningf("	Update CR status failed: %v", err)
+			klog.Warningf("	Update the status of zookeeper cluster %s failed: %v", c.zkCR.GetFullName(), err)
 		}
 		return err
 	})
@@ -121,14 +121,6 @@ func (c *Cluster) sync() error {
 		c.zkCR.Status.AppendScalingUpCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
 
 		return c.beginScaleUp()
-	} else if c.zkCR.Status.Members.Running.Size() > c.zkCR.Spec.Size {
-		c.zkCR.Status.AppendScalingDownCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
-
-		err = c.scaleDown()
-		if err == nil {
-			c.zkCR.Status.SetRunningCondition()
-		}
-		return err
 	}
 
 	if c.zkCR.Status.GetCurrentCondition().Type == api.ClusterScalingUp {
@@ -139,25 +131,42 @@ func (c *Cluster) sync() error {
 		c.zkCR.Status.SetRunningCondition()
 	}
 
-	// TODO: upgrade hasn't been tested yet
-	if c.zkCR.Spec.Version != c.zkCR.Status.CurrentVersion && c.zkCR.Status.TargetVersion == api.Empty {
-		c.zkCR.Status.AppendUpgradingCondition(c.zkCR.Spec.Version)
-		c.beginUpgrade()
-	}
-	if c.zkCR.Status.TargetVersion != api.Empty {
-		return c.upgradeOneMember()
-	}
-	if c.zkCR.Spec.Version != c.zkCR.Status.CurrentVersion && c.pickOneOldMember() == nil {
-		c.finishUpgrade()
+	if c.zkCR.Status.Members.Running.Size() > c.zkCR.Spec.Size {
+		c.zkCR.Status.AppendScalingDownCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
+
+		err = c.scaleDown()
+		if err != nil {
+			return err
+		}
 		c.zkCR.Status.SetRunningCondition()
 	}
 
-	c.zkCR.Status.SetRunningCondition()
+	if c.zkCR.Spec.Version != c.zkCR.Status.CurrentVersion && c.zkCR.Status.TargetVersion == api.Empty ||
+		// Users may change the Spec.Version while doing upgrading
+		c.zkCR.Status.TargetVersion != c.zkCR.Spec.Version && c.zkCR.Status.TargetVersion != api.Empty {
+		c.zkCR.Status.AppendUpgradingCondition(c.zkCR.Spec.Version)
+		c.beginUpgrade()
+	}
+
+	if c.zkCR.Status.TargetVersion != api.Empty {
+		if c.pickOneOldMember() == nil {
+			c.finishUpgrade()
+			c.zkCR.Status.SetRunningCondition()
+			return nil
+		}
+
+		err = c.upgradeOneMember()
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
 
-// TODO: also need to check /zkclient/zookeeper
 func (c *Cluster) IsFinished() bool {
-	return c.zkCR.Status.Members.Running.Size() == c.zkCR.Spec.Size
+	return c.zkCR.Status.Members.Running.Size() == c.zkCR.Spec.Size &&
+		c.zkCR.Status.GetCurrentCondition().Type == api.ClusterScalingUp &&
+		c.zkCR.Spec.Version == c.zkCR.Status.CurrentVersion &&
+		c.zkCR.Status.TargetVersion == api.Empty
 }

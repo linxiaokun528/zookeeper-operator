@@ -16,8 +16,10 @@ package k8sutil
 
 import (
 	"fmt"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
@@ -25,36 +27,37 @@ import (
 	clientsetretry "k8s.io/client-go/util/retry"
 )
 
-type CRD interface {
-	Create() error
-	Wait() error
-	CreateAndWait() error
-	CustomResourceDefinition() *apiextensionsv1.CustomResourceDefinition
+type CRDClient interface {
+	Create(crd *apiextensionsv1.CustomResourceDefinition) error
+	Wait(crd *apiextensionsv1.CustomResourceDefinition) error
+	CreateAndWait(crd *apiextensionsv1.CustomResourceDefinition) error
 }
 
-type crd struct {
-	client                   apiextensionsclientv1.CustomResourceDefinitionInterface
-	customResourceDefinition *apiextensionsv1.CustomResourceDefinition
+type crdClient struct {
+	client apiextensionsclientv1.CustomResourceDefinitionInterface
 }
 
-func (c *crd) Create() error {
-	customResourceDefinition, err := c.client.Create(c.customResourceDefinition)
-	if err == nil {
-		c.customResourceDefinition = customResourceDefinition
+func NewCRDClientOrDie(config *rest.Config) CRDClient {
+	return &crdClient{
+		client: apiextensionsclient.NewForConfigOrDie(config).ApiextensionsV1beta1().CustomResourceDefinitions(),
 	}
+}
+
+func (c *crdClient) Create(crd *apiextensionsv1.CustomResourceDefinition) error {
+	_, err := c.client.Create(crd)
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
 	return nil
 }
 
-func (c *crd) Wait() error {
+func (c *crdClient) Wait(crd *apiextensionsv1.CustomResourceDefinition) error {
 	err := clientsetretry.OnError(clientsetretry.DefaultRetry,
 		func(err error) bool {
 			return true
 		},
 		func() error {
-			crd, err := c.client.Get(c.customResourceDefinition.Name, metav1.GetOptions{})
+			crd, err := c.client.Get(crd.Name, metav1.GetOptions{})
 			if err != nil {
 				return err
 			}
@@ -74,26 +77,22 @@ func (c *crd) Wait() error {
 		})
 
 	if err != nil {
-		return fmt.Errorf("wait CRD created failed: %v", err)
+		return fmt.Errorf("wait CRDClient created failed: %v", err)
 	}
 	return nil
 }
 
-func (c *crd) CreateAndWait() error {
-	err := c.Create()
+func (c *crdClient) CreateAndWait(crd *apiextensionsv1.CustomResourceDefinition) error {
+	err := c.Create(crd)
 	if err != nil {
 		return err
 	}
 
-	return c.Wait()
+	return c.Wait(crd)
 }
 
-func (c *crd) CustomResourceDefinition() *apiextensionsv1.CustomResourceDefinition {
-	return c.customResourceDefinition
-}
-
-func NewCRD(client apiextensionsclientv1.CustomResourceDefinitionInterface, scope apiextensionsv1.ResourceScope,
-	gvk schema.GroupVersionKind, plural, shortName string) CRD {
+func NewCRD(scope apiextensionsv1.ResourceScope,
+	gvk schema.GroupVersionKind, plural, shortName string) *apiextensionsv1.CustomResourceDefinition {
 	customResourceDefinition := &apiextensionsv1.CustomResourceDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: plural + "." + gvk.Group,
@@ -118,8 +117,5 @@ func NewCRD(client apiextensionsclientv1.CustomResourceDefinitionInterface, scop
 		customResourceDefinition.Spec.Names.ShortNames = []string{shortName}
 	}
 
-	return &crd{
-		client:                   client,
-		customResourceDefinition: customResourceDefinition,
-	}
+	return customResourceDefinition
 }

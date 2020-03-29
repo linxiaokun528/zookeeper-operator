@@ -66,9 +66,6 @@ func (c *Cluster) addOneMember(m *api.Member, allClusterMembers *api.Members) er
 	}
 
 	klog.Infof("Added member (%s)", m.Name())
-	_, err = c.client.Event().Create(NewMemberAddEvent(m.Name(), c.zkCR))
-	if err != nil {
-		klog.Errorf("Failed to create new member add event: %v", err)
-	}
-	return nil
+
+	return c.createEvent(c.newMemberAddEvent(m.Name()))
 }

@@ -17,10 +17,13 @@ package v1alpha1
 import (
 	"encoding/json"
 	"fmt"
-	v1 "k8s.io/api/core/v1"
 	"sort"
 	"strconv"
 	"strings"
+
+	v1 "k8s.io/api/core/v1"
+
+	"zookeeper-operator/internal/util/k8sutil"
 )
 
 type clusterID struct {
@@ -291,13 +294,8 @@ func podToMember(clusterID *clusterID, pod *v1.Pod) *Member {
 	return &Member{
 		id:        getIdFromName(pod.Name),
 		clusterID: clusterID,
-		version:   getZookeeperVersion(pod),
+		version:   k8sutil.GetZookeeperVersion(pod),
 	}
-}
-
-// TODO: Figure out another way to do this
-func getZookeeperVersion(pod *v1.Pod) string {
-	return pod.Annotations["zookeeper.version"]
 }
 
 func (z *ZKCluster) RemoveMembers(size int) *Members {

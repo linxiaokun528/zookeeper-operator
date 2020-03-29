@@ -25,18 +25,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samuel/go-zookeeper/zk"
 
+	"zookeeper-operator/internal/client"
 	"zookeeper-operator/internal/controller"
-	"zookeeper-operator/internal/util/constants"
-	"zookeeper-operator/internal/util/k8sclient"
+	k8sutil2 "zookeeper-operator/internal/util/k8sutil"
 	"zookeeper-operator/internal/util/probe"
 	"zookeeper-operator/internal/version"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	k8sutil2 "zookeeper-operator/pkg/k8sutil"
+	"zookeeper-operator/pkg/k8sutil"
 	"zookeeper-operator/pkg/util"
 
 	"k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
-	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -89,7 +88,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	cli := k8sclient.NewClientOrDie(masterURL, kubeconfig)
+	cli := client.NewClientOrDie(masterURL, kubeconfig)
 	initCRDOrDie(cli.GetCRDClient())
 
 	http.HandleFunc(probe.HTTPReadyzEndpoint, probe.ReadyzHandler)
@@ -97,13 +96,13 @@ func main() {
 	go http.ListenAndServe(listenAddr, nil)
 
 	zkController := controller.New(cli)
-	ctx := context.TODO()
+	ctx := context.Background()
 
 	if !leaderElect {
 		zkController.Run(ctx)
 	} else {
-		namespace := util.GetEnvOrDie(constants.EnvOperatorPodNamespace)
-		name := util.GetEnvOrDie(constants.EnvOperatorPodName)
+		namespace := util.GetEnvOrDie(k8sutil2.EnvOperatorPodNamespace)
+		name := util.GetEnvOrDie(k8sutil2.EnvOperatorPodName)
 
 		id, err := os.Hostname()
 		if err != nil {
@@ -147,16 +146,16 @@ func createRecorder(kubecli kubernetes.Interface, name, namespace string) record
 	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: name})
 }
 
-// TODO: consider manage CRD outside of operator. If so, refactor zkclient.Client: use zkclient.CRClient to replace
+// TODO: consider manage CRDClient outside of operator. If so, refactor zkclient.Client: use zkclient.CRClient to replace
 // zkclient.Client. We won't need CRDClient anymore.
-func initCRDOrDie(client apiextensionsclientv1.CustomResourceDefinitionInterface) {
+func initCRDOrDie(client k8sutil.CRDClient) {
 	err := initCRD(client)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func initCRD(client apiextensionsclientv1.CustomResourceDefinitionInterface) error {
-	crd := k8sutil2.NewCRD(client, apiextensionsv1.NamespaceScoped, api.SchemeGroupVersionKind, api.Plural, api.Short)
-	return crd.CreateAndWait()
+func initCRD(client k8sutil.CRDClient) error {
+	crd := k8sutil.NewCRD(apiextensionsv1.NamespaceScoped, api.SchemeGroupVersionKind, api.Plural, api.Short)
+	return client.CreateAndWait(crd)
 }

@@ -3,13 +3,42 @@ package zkcluster
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/klog"
-	"strings"
 )
+
+func (c *Cluster) create() (err error) {
+	c.logClusterCreation()
+	defer func() {
+		if err == nil {
+			klog.Infof("Zookeeper cluster %v created successfully", c.zkCR.GetFullName())
+		}
+	}()
+
+	if err = c.setupServices(); err != nil {
+		return fmt.Errorf("zkCR create: failed to setup service: %v", err)
+	}
+
+	return nil
+}
+
+func (c *Cluster) logClusterCreation() {
+	specBytes, err := json.MarshalIndent(c.zkCR.Spec, "", "    ")
+	if err != nil {
+		klog.Errorf("Failed to marshal spec of zookeeper cluster %s: %v", c.zkCR.Name, err)
+		return
+	}
+
+	klog.Info("Creating zookeeper cluster %s with Spec: ", c.zkCR.Name)
+	for _, m := range strings.Split(string(specBytes), "\n") {
+		klog.Info(m)
+	}
+}
 
 func (c *Cluster) setupServices() error {
 	client_svc := newClientService(c.zkCR.Name)
@@ -33,34 +62,6 @@ func (c *Cluster) createService(service *v1.Service) error {
 	return nil
 }
 
-func (c *Cluster) create() (err error) {
-	c.logClusterCreation()
-	defer func() {
-		if err == nil {
-			klog.Infof("Zookeeper cluster %v created successfully", c.zkCR.GetFullName())
-		}
-	}()
-
-	if err = c.setupServices(); err != nil {
-		return fmt.Errorf("zkCR create: failed to setup service: %v", err)
-	}
-
-	return nil
-}
-
-func (c *Cluster) logClusterCreation() {
-	specBytes, err := json.MarshalIndent(c.zkCR.Spec, "", "    ")
-	if err != nil {
-		klog.Errorf("Failed to marshal spec of zookeeper cluster %s: %v", c.zkCR.Name, err)
-	}
-
-	klog.Info("Creating zookeeper cluster %s with Spec: ", c.zkCR.Name)
-	for _, m := range strings.Split(string(specBytes), "\n") {
-		klog.Info(m)
-	}
-}
-
-// TODO: write this service into a configurefile
 func newClientService(clusterName string) *v1.Service {
 	ports := []v1.ServicePort{{
 		Name:       "zkclient",

@@ -62,10 +62,5 @@ func (c *Cluster) replaceOneStoppedMember(toReplace *api.Member, cluster *api.Me
 	}
 	c.zkCR.Status.Members.Unready.Add(toReplace)
 
-	_, err = c.client.Event().Create(ReplacingDeadMemberEvent(toReplace.Name(), c.zkCR))
-	if err != nil {
-		klog.Errorf("failed to create replacing dead member event: %v", err)
-	}
-
-	return nil
+	return c.createEvent(c.newMemberReplaceEvent(toReplace.Name()))
 }

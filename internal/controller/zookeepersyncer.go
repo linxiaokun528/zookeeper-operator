@@ -1,17 +1,21 @@
 package controller
 
 import (
-	"k8s.io/apimachinery/pkg/runtime"
 	"time"
-	"zookeeper-operator/internal/util/k8sclient"
+
+	"k8s.io/apimachinery/pkg/runtime"
+
+	client2 "zookeeper-operator/internal/client"
 	"zookeeper-operator/internal/zkcluster"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/informer"
 )
 
+const retryWaitTime = 30 * time.Second
+
 type zookeeperSyncer struct {
 	adder  informer.ResourceRateLimitingAdder
-	client k8sclient.Client
+	client client2.Client
 }
 
 func (z *zookeeperSyncer) sync(obj runtime.Object) (bool, error) {
@@ -19,7 +23,7 @@ func (z *zookeeperSyncer) sync(obj runtime.Object) (bool, error) {
 	zkCluster := zkcluster.New(z.client.GetCRClient(cr.Namespace), cr)
 	defer func() {
 		if !zkCluster.IsFinished() {
-			z.adder.AddAfter(cr, 30*time.Second)
+			z.adder.AddAfter(cr, retryWaitTime)
 		}
 	}()
 

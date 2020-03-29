@@ -2,21 +2,22 @@ package zkcluster
 
 import (
 	"fmt"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strconv"
 	"strings"
+
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	k8sutil2 "zookeeper-operator/pkg/k8sutil"
+	"zookeeper-operator/pkg/k8sutil"
 )
 
 const (
 	// ZookeeperClientPort is the zkclient port on zkclient service and zookeeper nodes.
 	ZookeeperClientPort = 2181
 
-	zookeeperDataVolumeMountDir   = "/data"
-	zookeeperTlogVolumeMountDir   = "/datalog"
-	zookeeperVersionAnnotationKey = "zookeeper.version"
+	zookeeperDataVolumeMountDir = "/data"
+	zookeeperTlogVolumeMountDir = "/datalog"
 
 	zookeeperDataVolumeName = "zookeeper-data"
 	zookeeperTlogVolumeName = "zookeeper-tlog"
@@ -24,7 +25,7 @@ const (
 	defaultBusyboxImage = "busybox:1.28.0-glibc"
 )
 
-// TODO: write this configuration into a configuration file
+// TODO: use configmap to write clusterMembers into a configuration file
 func newZookeeperPod(m *api.Member, clusterMembers *api.Members, zkCR *api.ZookeeperCluster) *v1.Pod {
 	labels := map[string]string{
 		"app":               "zookeeper",
@@ -151,7 +152,7 @@ func applyPodPolicy(clusterName string, pod *v1.Pod, policy *api.PodPolicy) {
 	}
 
 	// TODO: write a map util or import a map util
-	k8sutil2.MergeLabels(pod.Labels, policy.Labels)
+	k8sutil.MergeLabels(pod.Labels, policy.Labels)
 
 	for i := range pod.Spec.Containers {
 		pod.Spec.Containers[i].Resources = policy.Resources
@@ -200,7 +201,7 @@ func zookeeperVolumeMounts() []v1.VolumeMount {
 func zookeeperContainer(repo, version string) v1.Container {
 	c := v1.Container{
 		Name:  "zookeeper",
-		Image: k8sutil2.ImageName(repo, version),
+		Image: imageName(repo, version),
 		Ports: []v1.ContainerPort{
 			{
 				Name:          "zkclient",
@@ -229,10 +230,20 @@ func zookeeperContainer(repo, version string) v1.Container {
 	return c
 }
 
-func getZookeeperVersion(pod *v1.Pod) string {
-	return pod.Annotations[zookeeperVersionAnnotationKey]
+func getRepository(pod *v1.Pod) string {
+	imageName := pod.Spec.Containers[0].Image
+	parts := strings.Split(imageName, ":v")
+	if len(parts) != 2 {
+		panic(fmt.Errorf("Invalid image name: %v", imageName))
+	}
+
+	return parts[0]
 }
 
 func setZookeeperVersion(pod *v1.Pod, version string) {
-	pod.Annotations[zookeeperVersionAnnotationKey] = version
+	pod.Spec.Containers[0].Image = imageName(getRepository(pod), version)
+}
+
+func imageName(repo, version string) string {
+	return fmt.Sprintf("%s:v%v", repo, version)
 }

@@ -12,18 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package k8sclient
+package client
 
 import (
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
 	"zookeeper-operator/pkg/client/clientset/versioned"
 	"zookeeper-operator/pkg/client/clientset/versioned/typed/zookeeper/v1alpha1"
+	"zookeeper-operator/pkg/k8sutil"
 )
+
+// Maybe use sigs.k8s.io/controller-runtime/pkg/manager instead
+type Client interface {
+	GetConfig() *rest.Config
+
+	GetCRClient(namespace string) CRClient
+	GetCRDClient() k8sutil.CRDClient
+
+	KubernetesInterface() kubernetes.Interface
+}
 
 func NewClientOrDie(masterURL string, kubeconfigPath string) Client {
 	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfigPath)
@@ -31,30 +41,18 @@ func NewClientOrDie(masterURL string, kubeconfigPath string) Client {
 		panic(err)
 	}
 	return &clientsets{
-		config:    cfg,
-		kubeCli:   kubernetes.NewForConfigOrDie(cfg),
-		apiExtCli: apiextensionsclient.NewForConfigOrDie(cfg),
-		zkCli:     versioned.NewForConfigOrDie(cfg),
+		config:  cfg,
+		kubeCli: kubernetes.NewForConfigOrDie(cfg),
+		crdCli:  k8sutil.NewCRDClientOrDie(cfg),
+		zkCli:   versioned.NewForConfigOrDie(cfg),
 	}
 }
 
-// Maybe use sigs.k8s.io/controller-runtime/pkg/manager instead
-type Client interface {
-	GetConfig() *rest.Config
-
-	GetCRClient(namespace string) CRClient
-	GetCRDClient() apiextensionsclientv1.CustomResourceDefinitionInterface
-
-	ZookeeperInterface() versioned.Interface
-	KubernetesInterface() kubernetes.Interface
-	APIExtensionsInterface() apiextensionsclient.Interface
-}
-
 type clientsets struct {
-	config    *rest.Config
-	kubeCli   kubernetes.Interface
-	apiExtCli apiextensionsclient.Interface
-	zkCli     versioned.Interface
+	config  *rest.Config
+	kubeCli kubernetes.Interface
+	crdCli  k8sutil.CRDClient
+	zkCli   versioned.Interface
 }
 
 func (c *clientsets) GetConfig() *rest.Config {
@@ -70,20 +68,12 @@ func (c *clientsets) GetCRClient(namespace string) CRClient {
 	}
 }
 
-func (c *clientsets) GetCRDClient() apiextensionsclientv1.CustomResourceDefinitionInterface {
-	return c.apiExtCli.ApiextensionsV1beta1().CustomResourceDefinitions()
-}
-
-func (c *clientsets) ZookeeperInterface() versioned.Interface {
-	return c.zkCli
+func (c *clientsets) GetCRDClient() k8sutil.CRDClient {
+	return c.crdCli
 }
 
 func (c *clientsets) KubernetesInterface() kubernetes.Interface {
 	return c.kubeCli
-}
-
-func (c *clientsets) APIExtensionsInterface() apiextensionsclient.Interface {
-	return c.apiExtCli
 }
 
 type CRClient interface {

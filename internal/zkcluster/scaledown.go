@@ -60,18 +60,12 @@ func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 	// TODO: @MDF: Add PV support
 	/*
 		if c.isPodPVEnabled() {
-			err = c.removePVC(k8sclient.PVCNameFromMember(toRemove.Name))
+			err = c.removePVC(k8sutil.PVCNameFromMember(toRemove.Name))
 			if err != nil {
 				return err
 			}
 		}
 	*/
 
-	_, err = c.client.Event().Create(MemberRemoveEvent(m.Name(), c.zkCR))
-	if err != nil {
-		klog.Errorf("failed to create remove member event: %v", err)
-	}
-
-	klog.Infof("Zookeeper member (%v) is removed", m.Name())
-	return nil
+	return c.createEvent(c.newMemberRemoveEvent(m.Name()))
 }

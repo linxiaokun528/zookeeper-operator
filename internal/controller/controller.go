@@ -16,23 +16,25 @@ package controller
 
 import (
 	"context"
+	"time"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
-	"time"
-	"zookeeper-operator/internal/util/k8sclient"
+
+	client2 "zookeeper-operator/internal/client"
 	"zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/informer"
 )
 
-var initRetryWaitTime = 30 * time.Second
+const reSyncTime = 2 * time.Minute
 
 type Controller struct {
-	client k8sclient.Client
+	client client2.Client
 }
 
-func New(client k8sclient.Client) *Controller {
+func New(client client2.Client) *Controller {
 	return &Controller{
 		client: client,
 	}
@@ -42,7 +44,7 @@ func (c *Controller) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
 	resourceSyncer := c.newResourceSyncerForZookeeper(ctx)
-	resourceSyncer.Run(5, ctx.Done())
+	resourceSyncer.Run(5, reSyncTime, ctx.Done())
 
 	// TODO: add a pod informer to watch related pods
 }

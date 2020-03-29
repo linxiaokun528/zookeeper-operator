@@ -15,8 +15,6 @@
 package k8sutil
 
 import (
-	//"zookeeper-operator/util/zookeeperutil"
-
 	"k8s.io/api/core/v1"
 )
 

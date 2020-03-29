@@ -15,10 +15,12 @@
 package zookeeperutil
 
 import (
-	"k8s.io/klog"
 	"sort"
 	"strings"
 	"time"
+
+	"k8s.io/klog"
+
 	/* TODO: The error message of this ZK zkclient is too simple. Maybe change a zk zkclient in the future.
 	 */
 	"github.com/samuel/go-zookeeper/zk"
@@ -28,7 +30,7 @@ func GetClusterConfig(hosts []string) ([]string, error) {
 	conn, _, err := zk.Connect(hosts, time.Second)
 	defer conn.Close()
 	if err != nil {
-		klog.Error("Failed to connect to ZK hosts: ", hosts)
+		klog.Errorf("Failed to connect to ZK hosts: ", hosts)
 		return nil, err
 	}
 

@@ -16,11 +16,12 @@ package zkcluster
 
 import (
 	"fmt"
-	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog"
+
+	"zookeeper-operator/internal/util/k8sutil"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
 func (c *Cluster) beginUpgrade() {
@@ -60,19 +61,13 @@ func (c *Cluster) upgradeMember(memberName string) error {
 	}
 	oldpod := pod.DeepCopy()
 
-	klog.Infof("Upgrading the zookeeper member %v from %s to %s", memberName, getZookeeperVersion(pod), c.zkCR.Spec.Version)
-	pod.Spec.Containers[0].Image = k8sutil2.ImageName(c.zkCR.Spec.Repository, c.zkCR.Spec.Version)
+	klog.Infof("Upgrading the zookeeper member %v from %s to %s", memberName, k8sutil.GetZookeeperVersion(pod), c.zkCR.Spec.Version)
 	setZookeeperVersion(pod, c.zkCR.Spec.Version)
 
 	_, err = c.client.Pod().Update(pod)
 	if err != nil {
 		return fmt.Errorf("fail to update the zookeeper member (%s): %v", memberName, err)
 	}
-	klog.Infof("finished upgrading the zookeeper member %v", memberName)
-	_, err = c.client.Event().Create(MemberUpgradedEvent(memberName, getZookeeperVersion(oldpod), c.zkCR.Spec.Version, c.zkCR))
-	if err != nil {
-		klog.Errorf("failed to create member upgraded event: %v", err)
-	}
 
-	return nil
+	return c.createEvent(c.newMemberUpgradedEvent(memberName, k8sutil.GetZookeeperVersion(oldpod), c.zkCR.Spec.Version))
 }

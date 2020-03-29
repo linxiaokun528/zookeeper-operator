@@ -3,6 +3,9 @@ package informer
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -14,8 +17,6 @@ import (
 	"k8s.io/klog"
 	sigcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
-	"strings"
-	"time"
 )
 
 type syncFunc func(obj runtime.Object) (bool, error)
@@ -80,7 +81,7 @@ func NewResourceSyncerFactory(config *rest.Config, scheme *runtime.Scheme,
 type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) Syncer
 
 type ResourceSyncer interface {
-	Run(workerNum int, stopCh <-chan struct{})
+	Run(workerNum int, resyncPeriod time.Duration, stopCh <-chan struct{})
 }
 
 type resourceSyncer struct {
@@ -121,7 +122,7 @@ func (i *resourceSyncer) objToKey(obj interface{}) string {
 	return key
 }
 
-func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
+func (i *resourceSyncer) Run(workerNum int, resyncPeriod time.Duration, stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	defer i.eventQueue.ShutDown()
 
@@ -131,11 +132,11 @@ func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
 		return
 	}
 
-	i.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	i.informer.AddEventHandlerWithResyncPeriod(cache.ResourceEventHandlerFuncs{
 		AddFunc:    i.onAdd,
 		UpdateFunc: i.onUpdate,
 		DeleteFunc: i.onDelete,
-	})
+	}, resyncPeriod)
 
 	i.eventQueue.Start(workerNum, stopCh)
 }
