@@ -31,6 +31,8 @@ type ResourceSyncerFactory interface {
 	Start(stopCh <-chan struct{}) error
 }
 
+type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) Syncer
+
 type resourceSyncerFactory struct {
 	config *rest.Config
 	cache  sigcache.Cache
@@ -64,10 +66,10 @@ func (r *resourceSyncerFactory) Start(stopCh <-chan struct{}) error {
 }
 
 func NewResourceSyncerFactory(config *rest.Config, scheme *runtime.Scheme,
-	resync *time.Duration) (ResourceSyncerFactory, error) {
+	resync time.Duration) (ResourceSyncerFactory, error) {
 	opt := sigcache.Options{
 		Scheme: scheme,
-		Resync: resync,
+		Resync: &resync,
 	}
 
 	cache, err := sigcache.New(config, opt)
@@ -78,10 +80,8 @@ func NewResourceSyncerFactory(config *rest.Config, scheme *runtime.Scheme,
 	return &resourceSyncerFactory{config: config, cache: cache, scheme: scheme}, nil
 }
 
-type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) Syncer
-
 type ResourceSyncer interface {
-	Run(workerNum int, resyncPeriod time.Duration, stopCh <-chan struct{})
+	Run(workerNum int, stopCh <-chan struct{})
 }
 
 type resourceSyncer struct {
@@ -122,7 +122,7 @@ func (i *resourceSyncer) objToKey(obj interface{}) string {
 	return key
 }
 
-func (i *resourceSyncer) Run(workerNum int, resyncPeriod time.Duration, stopCh <-chan struct{}) {
+func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	defer i.eventQueue.ShutDown()
 
@@ -132,11 +132,11 @@ func (i *resourceSyncer) Run(workerNum int, resyncPeriod time.Duration, stopCh <
 		return
 	}
 
-	i.informer.AddEventHandlerWithResyncPeriod(cache.ResourceEventHandlerFuncs{
+	i.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    i.onAdd,
 		UpdateFunc: i.onUpdate,
 		DeleteFunc: i.onDelete,
-	}, resyncPeriod)
+	})
 
 	i.eventQueue.Start(workerNum, stopCh)
 }

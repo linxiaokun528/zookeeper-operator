@@ -4,6 +4,8 @@
 
 ## Overview
 
+This project was forked and adapted from [Nuance-Mobility/zookeeper-operator][original-operator-url]
+
 The Zookeeper operator manages Zookeeper clusters deployed to [Kubernetes][k8s-home] and automates tasks related to operating a Zookeeper cluster.
 
 - [Create and destroy](#create-and-destroy-a-zookeeper-cluster)
@@ -13,10 +15,14 @@ The Zookeeper operator manages Zookeeper clusters deployed to [Kubernetes][k8s-h
 
 ## Requirements
 
-- Kubernetes 1.7+
-- Zookeeper 3.5.3-beta+
+- Kubernetes 1.15+
+- Zookeeper 3.5.0+
 
 ## Install Zookeeper operator
+
+Build operator image:
+
+Refer to [./doc/BUILDING.md][building-file]
 
 Create a deployment for Zookeeper operator:
 
@@ -206,3 +212,5 @@ example-zookeeper-cluster-4       1/1       Running   0          1m
 
 
 [k8s-home]: http://kubernetes.io
+[original-operator-url]: https://github.com/Nuance-Mobility/zookeeper-operator
+[building-file]: ./doc/BUILDING.md

@@ -25,7 +25,7 @@ bin_dir="$(pwd)/_output/bin"
 mkdir -p ${bin_dir} || true
 
 
-gitHash="github.com/nuance-mobility/zookeeper-operator/version.GitSHA=${GIT_SHA}"
+gitHash="github.com/linxiaokun528/zookeeper-operator/version.GitSHA=${GIT_SHA}"
 
 go_ldflags="-X ${gitHash}"
 

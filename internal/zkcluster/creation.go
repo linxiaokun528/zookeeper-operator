@@ -13,6 +13,12 @@ import (
 )
 
 func (c *Cluster) create() (err error) {
+	now := metav1.Now()
+	c.zkCR.Status.StartTime = &now
+	c.zkCR.SetDefaults()
+	c.zkCR.Status.SetVersion(c.zkCR.Spec.Version)
+	c.zkCR.Status.AppendCreatingCondition()
+
 	c.logClusterCreation()
 	defer func() {
 		if err == nil {
@@ -65,8 +71,8 @@ func (c *Cluster) createService(service *v1.Service) error {
 func newClientService(clusterName string) *v1.Service {
 	ports := []v1.ServicePort{{
 		Name:       "zkclient",
-		Port:       ZookeeperClientPort,
-		TargetPort: intstr.FromInt(ZookeeperClientPort),
+		Port:       zookeeperClientPort,
+		TargetPort: intstr.FromInt(zookeeperClientPort),
 		Protocol:   v1.ProtocolTCP,
 	}}
 	return newService(clusterName+"-zkclient", clusterName, "", ports)
@@ -75,8 +81,8 @@ func newClientService(clusterName string) *v1.Service {
 func newPeerService(clusterName string) *v1.Service {
 	ports := []v1.ServicePort{{
 		Name:       "zkclient",
-		Port:       ZookeeperClientPort,
-		TargetPort: intstr.FromInt(ZookeeperClientPort),
+		Port:       zookeeperClientPort,
+		TargetPort: intstr.FromInt(zookeeperClientPort),
 		Protocol:   v1.ProtocolTCP,
 	}, {
 		Name:       "peer",

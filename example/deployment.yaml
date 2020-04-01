@@ -11,8 +11,7 @@ spec:
     spec:
       containers:
       - name: zookeeper-operator
-        image: blafrisch/zookeeper-operator:latest
-        imagePullPolicy: Always
+        image: zookeeper-operator:0.1.0
         env:
         - name: MY_POD_NAMESPACE
           valueFrom:

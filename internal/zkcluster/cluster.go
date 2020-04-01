@@ -49,6 +49,8 @@ func (c *Cluster) SyncAndUpdateStatus() (err error) {
 		if !reflect.DeepEqual(origin, c.zkCR.Status) {
 			update_err := c.updateStatus()
 			err = errors.NewCompoundedError(err, update_err)
+		} else {
+			klog.Infof("Status not changed. Don't need to update the status of zookeeper cluster %s", c.zkCR.GetFullName())
 		}
 	}()
 	return c.sync()
@@ -65,8 +67,10 @@ func (c *Cluster) updateStatus() error {
 		// We are supposed to use UpdateStatus here. But we don't have a status resource yet.
 		// TODO: add a default value to the status in CRD
 		new, err = c.client.ZookeeperCluster().Update(new)
-		if err != nil {
-			klog.Warningf("	Update the status of zookeeper cluster %s failed: %v", c.zkCR.GetFullName(), err)
+		if err == nil {
+			klog.Infof("Status of zookeeper cluster %s updated successfully", c.zkCR.GetFullName())
+		} else {
+			klog.Warningf("Failed to update the status of zookeeper cluster %s: %v", c.zkCR.GetFullName(), err)
 		}
 		return err
 	})
@@ -77,11 +81,6 @@ func (c *Cluster) sync() error {
 	defer klog.Infof("Finish syncing zookeeper cluster %v", c.zkCR.GetFullName())
 
 	if c.zkCR.Status.StartTime == nil {
-		now := metav1.Now()
-		c.zkCR.Status.StartTime = &now
-		c.zkCR.Status.SetVersion(c.zkCR.Spec.Version)
-		c.zkCR.Status.AppendCreatingCondition()
-
 		// TODO: consider the situation that the services are deleted
 		err := c.create()
 		if err != nil {
@@ -165,8 +164,8 @@ func (c *Cluster) sync() error {
 }
 
 func (c *Cluster) IsFinished() bool {
-	return c.zkCR.Status.Members.Running.Size() == c.zkCR.Spec.Size &&
-		c.zkCR.Status.GetCurrentCondition().Type == api.ClusterScalingUp &&
+	return c.zkCR.Status.GetCurrentCondition().Type == api.ClusterRunning &&
+		c.zkCR.Status.Members.Running.Size() == c.zkCR.Spec.Size &&
 		c.zkCR.Spec.Version == c.zkCR.Status.CurrentVersion &&
 		c.zkCR.Status.TargetVersion == api.Empty
 }

@@ -62,7 +62,7 @@ func (c *Cluster) upgradeMember(memberName string) error {
 	oldpod := pod.DeepCopy()
 
 	klog.Infof("Upgrading the zookeeper member %v from %s to %s", memberName, k8sutil.GetZookeeperVersion(pod), c.zkCR.Spec.Version)
-	setZookeeperVersion(pod, c.zkCR.Spec.Version)
+	k8sutil.SetZookeeperVersion(pod, c.zkCR.Spec.Version)
 
 	_, err = c.client.Pod().Update(pod)
 	if err != nil {

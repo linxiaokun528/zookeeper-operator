@@ -2,14 +2,15 @@ package informer
 
 import (
 	"fmt"
+	"strings"
+	"sync"
+	"time"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/util/workqueue"
-	"strings"
-	"sync"
-	"time"
 )
 
 type Consumer func(obj interface{}) (bool, error)

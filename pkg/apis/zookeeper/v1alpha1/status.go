@@ -25,7 +25,6 @@ type ClusterConditionType string
 const (
 	ClusterCreating    = "Creating"
 	ClusterRunning     = "Running"
-	ClusterFailed      = "Failed"
 	ClusterScalingUp   = "ScalingUp"
 	ClusterScalingDown = "ScalingDown"
 	ClusterRecovering  = "Recovering"
@@ -45,13 +44,6 @@ type ClusterStatus struct {
 	// Size is the current size of the zkcluster
 	Size int `json:"size,omit"`
 
-	// ServiceName is the LB service for accessing zookeeper nodes.
-	ServiceName string `json:"serviceName,omitempty"`
-
-	// ClientPort is the port for zookeeper zkclient to access.
-	// It's the same on zkclient LB service and zookeeper nodes.
-	ClientPort int `json:"clientPort,omitempty"`
-
 	// Members are the zookeeper members in the zkcluster
 	Members *ZKCluster `json:"members"`
 	// CurrentVersion is the current zkcluster version
@@ -62,6 +54,7 @@ type ClusterStatus struct {
 }
 
 type ClusterPhase struct {
+	// Type of the current cluster phase
 	Type ClusterPhaseType `json:"type"`
 	// The last time this condition was updated.
 	LastUpdateTime metav1.Time `json:"lastUpdateTime,omitempty"`

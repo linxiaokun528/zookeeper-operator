@@ -1,9 +1,12 @@
 package zkcluster
 
 import (
-	"k8s.io/klog"
 	"sync"
+
+	"k8s.io/klog"
+
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/pkg/errors"
 )
 
 func (c *Cluster) ReplaceStoppedMembers() (err error) {
@@ -18,7 +21,6 @@ func (c *Cluster) ReplaceStoppedMembers() (err error) {
 	all := c.zkCR.Status.Members.Running.Copy()
 	all.Update(&c.zkCR.Status.Members.Stopped)
 
-	// TODO: we have a pattern: wait-for-error. Need to refactor this.
 	wait := sync.WaitGroup{}
 	wait.Add(c.zkCR.Status.Members.Stopped.Size())
 	errCh := make(chan error)
@@ -32,17 +34,9 @@ func (c *Cluster) ReplaceStoppedMembers() (err error) {
 		}()
 	}
 	wait.Wait()
+	close(errCh)
 
-	select {
-	case err = <-errCh:
-		// all errors have been reported before, we only need to inform the controller that there was an error and it should re-try this job once more next time.
-		if err != nil {
-			return err
-		}
-	default:
-	}
-
-	return nil
+	return errors.NewCompoundedErrorFromChan(errCh)
 }
 
 func (c *Cluster) replaceOneStoppedMember(toReplace *api.Member, cluster *api.Members) error {

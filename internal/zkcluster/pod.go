@@ -8,13 +8,13 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"zookeeper-operator/internal/util/k8sutil"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/pkg/k8sutil"
 )
 
 const (
-	// ZookeeperClientPort is the zkclient port on zkclient service and zookeeper nodes.
-	ZookeeperClientPort = 2181
+	// zookeeperClientPort is the zkclient port on zkclient service and zookeeper nodes.
+	zookeeperClientPort = 2181
 
 	zookeeperDataVolumeMountDir = "/data"
 	zookeeperTlogVolumeMountDir = "/datalog"
@@ -53,6 +53,9 @@ func newZookeeperPod(m *api.Member, clusterMembers *api.Members, zkCR *api.Zooke
 	}, v1.EnvVar{
 		Name:  "ZOO_MAX_CLIENT_CNXNS",
 		Value: "0", // default 60
+	}, v1.EnvVar{
+		Name:  "ZOO_4LW_COMMANDS_WHITELIST",
+		Value: "*",
 	})
 	// Other available config items:
 	// - ZOO_TICK_TIME: 2000
@@ -79,11 +82,7 @@ func newZookeeperPod(m *api.Member, clusterMembers *api.Members, zkCR *api.Zooke
 		},
 		Spec: v1.PodSpec{
 			InitContainers: []v1.Container{{
-				// busybox:latest uses uclibc which contains a bug that sometimes prevents name resolution
-				// More info: https://github.com/docker-library/busybox/issues/27
-				//Image default: "busybox:1.28.0-glibc",
-				// TODO: use the same image as the main container
-				Image: imageNameBusybox(zkCR.Spec.Pod),
+				Image: "busybox:1.28.0-glibc",
 				Name:  "check-dns",
 				// We bind to [hostname].[clustername].[namespace].svc which may take some time to appear in kubedns
 				Command: []string{"/bin/sh", "-c", fmt.Sprintf(
@@ -108,9 +107,8 @@ done`, m.Addr())},
 			},
 		},
 	}
-	// TODO: make this function "SetAnnotations"
-	setZookeeperVersion(pod, zkCR.Spec.Version)
-	applyPodPolicy(m.ClusterName(), pod, zkCR.Spec.Pod)
+
+	k8sutil.SetZookeeperVersion(pod, zkCR.Spec.Version)
 	pod.OwnerReferences = append(pod.OwnerReferences, zkCR.AsOwner())
 	return pod
 }
@@ -125,48 +123,13 @@ fi`
 	return &v1.Probe{
 		Handler: v1.Handler{
 			Exec: &v1.ExecAction{
-				Command: []string{"/bin/sh", "-c", cmd},
+				Command: []string{"/bin/bash", "-c", cmd},
 			},
 		},
 		InitialDelaySeconds: 100,
 		TimeoutSeconds:      100,
 		PeriodSeconds:       600,
 		FailureThreshold:    3,
-	}
-}
-
-func applyPodPolicy(clusterName string, pod *v1.Pod, policy *api.PodPolicy) {
-	if policy == nil {
-		return
-	}
-
-	if policy.Affinity != nil {
-		pod.Spec.Affinity = policy.Affinity
-	}
-
-	if len(policy.NodeSelector) != 0 {
-		pod.Spec.NodeSelector = policy.NodeSelector
-	}
-	if len(policy.Tolerations) != 0 {
-		pod.Spec.Tolerations = policy.Tolerations
-	}
-
-	// TODO: write a map util or import a map util
-	k8sutil.MergeLabels(pod.Labels, policy.Labels)
-
-	for i := range pod.Spec.Containers {
-		pod.Spec.Containers[i].Resources = policy.Resources
-		if pod.Spec.Containers[i].Name == "zookeeper" {
-			pod.Spec.Containers[i].Env = append(pod.Spec.Containers[i].Env, policy.ZookeeperEnv...)
-		}
-	}
-
-	for i := range pod.Spec.InitContainers {
-		pod.Spec.InitContainers[i].Resources = policy.Resources
-	}
-
-	for key, value := range policy.Annotations {
-		pod.ObjectMeta.Annotations[key] = value
 	}
 }
 
@@ -183,14 +146,6 @@ func AddZookeeperVolumeToPod(pod *v1.Pod, pvc *v1.PersistentVolumeClaim) {
 	pod.Spec.Volumes = append(pod.Spec.Volumes, vol)
 }
 
-// imageNameBusybox returns the default image for busybox init container, or the image specified in the PodPolicy
-func imageNameBusybox(policy *api.PodPolicy) string {
-	if policy != nil && len(policy.BusyboxImage) > 0 {
-		return policy.BusyboxImage
-	}
-	return defaultBusyboxImage
-}
-
 func zookeeperVolumeMounts() []v1.VolumeMount {
 	return []v1.VolumeMount{
 		{Name: zookeeperDataVolumeName, MountPath: zookeeperDataVolumeMountDir},
@@ -201,11 +156,11 @@ func zookeeperVolumeMounts() []v1.VolumeMount {
 func zookeeperContainer(repo, version string) v1.Container {
 	c := v1.Container{
 		Name:  "zookeeper",
-		Image: imageName(repo, version),
+		Image: k8sutil.ImageName(repo, version),
 		Ports: []v1.ContainerPort{
 			{
 				Name:          "zkclient",
-				ContainerPort: int32(ZookeeperClientPort),
+				ContainerPort: int32(zookeeperClientPort),
 				Protocol:      v1.ProtocolTCP,
 			},
 			{
@@ -228,22 +183,4 @@ func zookeeperContainer(repo, version string) v1.Container {
 	}
 
 	return c
-}
-
-func getRepository(pod *v1.Pod) string {
-	imageName := pod.Spec.Containers[0].Image
-	parts := strings.Split(imageName, ":v")
-	if len(parts) != 2 {
-		panic(fmt.Errorf("Invalid image name: %v", imageName))
-	}
-
-	return parts[0]
-}
-
-func setZookeeperVersion(pod *v1.Pod, version string) {
-	pod.Spec.Containers[0].Image = imageName(getRepository(pod), version)
-}
-
-func imageName(repo, version string) string {
-	return fmt.Sprintf("%s:v%v", repo, version)
 }

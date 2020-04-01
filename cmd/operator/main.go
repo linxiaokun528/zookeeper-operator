@@ -101,6 +101,7 @@ func main() {
 	if !leaderElect {
 		zkController.Run(ctx)
 	} else {
+		// TODO: Don't use environment variable to do this. Use flag and default value instead.
 		namespace := util.GetEnvOrDie(k8sutil2.EnvOperatorPodNamespace)
 		name := util.GetEnvOrDie(k8sutil2.EnvOperatorPodName)
 
