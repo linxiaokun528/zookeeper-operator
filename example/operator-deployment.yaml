@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: zookeeper-operator
 spec:
-  replicas: 2
+  replicas: 1
   template:
     metadata:
       labels:
@@ -18,4 +18,4 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
         command:  ["zookeeper-operator"]
-        args: ["--namespace=$(MY_POD_NAMESPACE)"]
+        args: ["--namespace=$(MY_POD_NAMESPACE)", "--leader-elect=false"]

@@ -28,7 +28,7 @@ import (
 	"zookeeper-operator/pkg/informer"
 )
 
-const resyncTime = 2 * time.Minute
+const resyncTime = 30 * time.Second
 
 type Controller struct {
 	client client2.Client
@@ -46,7 +46,7 @@ func (c *Controller) Run(ctx context.Context) {
 	resourceSyncer := c.newResourceSyncerForZookeeper(ctx)
 	resourceSyncer.Run(5, ctx.Done())
 
-	// TODO: add a pod informer to watch related pods
+	// TODO: add a pod informer to watch related pods. And then set resyncTime to 2 minutes.
 }
 
 func (c *Controller) newResourceSyncerForZookeeper(ctx context.Context) informer.ResourceSyncer {
