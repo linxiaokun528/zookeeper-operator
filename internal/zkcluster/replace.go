@@ -23,7 +23,7 @@ func (c *Cluster) ReplaceStoppedMembers() (err error) {
 
 	wait := sync.WaitGroup{}
 	wait.Add(c.zkCR.Status.Members.Stopped.Size())
-	errCh := make(chan error)
+	errCh := make(chan error, c.zkCR.Status.Members.Stopped.Size())
 	for _, dead_member := range c.zkCR.Status.Members.Stopped.GetElements() {
 		go func() {
 			defer wait.Done()

@@ -28,7 +28,7 @@ func (c *Cluster) beginScaleUp() (err error) {
 
 	wait := sync.WaitGroup{}
 	wait.Add(newMembers.Size())
-	errCh := make(chan error)
+	errCh := make(chan error, newMembers.Size())
 
 	for _, member := range newMembers.GetElements() {
 		go func(newMember *api.Member, allClusterMembers *api.Members) {
