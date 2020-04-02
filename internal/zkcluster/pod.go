@@ -21,8 +21,6 @@ const (
 
 	zookeeperDataVolumeName = "zookeeper-data"
 	zookeeperTlogVolumeName = "zookeeper-tlog"
-
-	defaultBusyboxImage = "busybox:1.28.0-glibc"
 )
 
 // TODO: use configmap to write clusterMembers into a configuration file
@@ -82,6 +80,7 @@ func newZookeeperPod(m *api.Member, clusterMembers *api.Members, zkCR *api.Zooke
 		},
 		Spec: v1.PodSpec{
 			InitContainers: []v1.Container{{
+				// TODO: use zookeeper-instance image instead
 				Image: "busybox:1.28.0-glibc",
 				Name:  "check-dns",
 				// We bind to [hostname].[clustername].[namespace].svc which may take some time to appear in kubedns
