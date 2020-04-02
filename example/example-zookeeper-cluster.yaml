@@ -2,5 +2,6 @@ apiVersion: "zookeeper.database.apache.com/v1alpha1"
 kind: "ZookeeperCluster"
 metadata:
   name: "example-zookeeper-cluster"
-  size: 5
+spec:
+  size: 3
   version: "3.5.7"

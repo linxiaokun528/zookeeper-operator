@@ -15,7 +15,6 @@ import (
 func (c *Cluster) create() (err error) {
 	now := metav1.Now()
 	c.zkCR.Status.StartTime = &now
-	c.zkCR.SetDefaults()
 	c.zkCR.Status.SetVersion(c.zkCR.Spec.Version)
 	c.zkCR.Status.AppendCreatingCondition()
 

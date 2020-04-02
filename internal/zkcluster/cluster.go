@@ -80,6 +80,8 @@ func (c *Cluster) sync() error {
 	klog.Infof("Start syncing zookeeper cluster %v", c.zkCR.GetFullName())
 	defer klog.Infof("Finish syncing zookeeper cluster %v", c.zkCR.GetFullName())
 
+	c.zkCR.SetDefaults()
+
 	if c.zkCR.Status.StartTime == nil {
 		// TODO: consider the situation that the services are deleted
 		err := c.create()

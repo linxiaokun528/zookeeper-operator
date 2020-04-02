@@ -55,7 +55,7 @@ Clean up Zookeeper operator:
 2. Clean related resources.
 
     ```bash
-    kubectl api-resources --verbs=get -o name | grep -v componentstatus | xargs -n 1 kubectl get  --show-kind --ignore-not-found -l app=zookeeper-operator -o name| xargs kubectl delete
+    $ kubectl api-resources --verbs=get -o name | grep -v componentstatus | xargs -n 1 kubectl get  --show-kind --ignore-not-found -l app=zookeeper-operator -o name | xargs kubectl delete
     ```
 
 ## Create and destroy a Zookeeper cluster
