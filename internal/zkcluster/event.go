@@ -16,12 +16,10 @@ package zkcluster
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"k8s.io/klog"
 
-	"zookeeper-operator/internal/util/k8sutil"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 
 	"k8s.io/api/core/v1"
@@ -84,7 +82,7 @@ func (c *Cluster) newClusterEvent() *v1.Event {
 			ResourceVersion: c.zkCR.ResourceVersion,
 		},
 		Source: v1.EventSource{
-			Component: os.Getenv(k8sutil.EnvOperatorPodName),
+			Component: "zookeeper-controller",
 		},
 		// Each zkcluster event is unique so it should not be collapsed with other events
 		FirstTimestamp: metav1.Time{Time: t},

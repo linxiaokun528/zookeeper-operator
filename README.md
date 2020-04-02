@@ -20,9 +20,7 @@ The Zookeeper operator manages Zookeeper clusters deployed to [Kubernetes][k8s-h
 
 ## Install Zookeeper operator
 
-Build operator image:
-
-Refer to [./doc/BUILDING.md][building-file]
+Refer to [BUILDING][building-doc] to build zookeeper-operator image.
 
 Create a deployment for Zookeeper operator:
 
@@ -48,12 +46,23 @@ To delete all clusters, delete all cluster CR objects before uninstalling the op
 
 Clean up Zookeeper operator:
 
-```bash
-kubectl delete -f example/deployment.yaml
-```
+1. Delete the operator.
+
+    ```bash
+    $ kubectl delete -f example/deployment.yaml
+    ```
+
+2. Clean related resources.
+
+    ```bash
+    kubectl api-resources --verbs=get -o name | grep -v componentstatus | xargs -n 1 kubectl get  --show-kind --ignore-not-found -l app=zookeeper-operator -o name| xargs kubectl delete
+    ```
 
 ## Create and destroy a Zookeeper cluster
 
+Refer to [BUILDING][building-doc] to build zookeeper-instance image.
+
+Create a Zookeeper cluster:
 ```bash
 $ kubectl create -f example/example-zookeeper-cluster.yaml
 ```
@@ -93,7 +102,7 @@ metadata:
   name: "example-zookeeper-cluster"
 spec:
   size: 5
-  version: "3.5.3-beta"
+  version: "3.5.7"
 ```
 
 Apply the size change to the cluster CR:
@@ -121,7 +130,7 @@ metadata:
   name: "example-zookeeper-cluster"
 spec:
   size: 3
-  version: "3.5.3-beta"
+  version: "3.5.7"
 ```
 ```
 $ kubectl apply -f example/example-zookeeper-cluster.yaml
@@ -202,15 +211,6 @@ example-zookeeper-cluster-4       1/1       Running   0          1m
 ```
 
 
-## Limitations
-
-- The Zookeeper operator only manages the Zookeeper cluster created in the same namespace. Users need to create multiple operators in different namespaces to manage Zookeeper clusters in different namespaces.
-- Persistent volumes not currently supported.
-- If quorum is lost in the cluster reconfiguration breaks.
-- Cluster downsizing is naive, can kill the quorum leader causing re-election.
-- Cluster upgrade is naive, may prematurely upgrade the quorum leader causing re-election
-
-
 [k8s-home]: http://kubernetes.io
 [original-operator-url]: https://github.com/Nuance-Mobility/zookeeper-operator
-[building-file]: ./doc/BUILDING.md
+[building-doc]: ./doc/BUILDING.md

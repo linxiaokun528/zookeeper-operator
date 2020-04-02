@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"runtime"
@@ -24,16 +25,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samuel/go-zookeeper/zk"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"zookeeper-operator/internal/client"
-	"zookeeper-operator/internal/controller"
-	k8sutil2 "zookeeper-operator/internal/util/k8sutil"
-	"zookeeper-operator/internal/util/probe"
-	"zookeeper-operator/internal/version"
-	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
-	"zookeeper-operator/pkg/k8sutil"
-	"zookeeper-operator/pkg/util"
-
+	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/client-go/kubernetes"
@@ -44,6 +39,13 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/component-base/logs"
 	"k8s.io/klog"
+
+	"zookeeper-operator/internal/client"
+	"zookeeper-operator/internal/controller"
+	"zookeeper-operator/internal/util/probe"
+	"zookeeper-operator/internal/version"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
+	"zookeeper-operator/pkg/k8sutil"
 )
 
 var (
@@ -52,11 +54,15 @@ var (
 
 	masterURL  string
 	kubeconfig string
+	namespace  string
 
 	listenAddr string
 )
 
+const COMPONENT_NAME = "zookeeper-operator"
+
 func init() {
+	flag.StringVar(&namespace, "namespace", "", "The namespace this operator is running on")
 	flag.StringVar(&listenAddr, "listen-addr", "0.0.0.0:8080", "The address on which the HTTP server will listen to")
 	flag.BoolVar(&printVersion, "version", false, "Show version and quit")
 	flag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader elect")
@@ -64,6 +70,9 @@ func init() {
 	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-zkcluster.")
 
 	flag.Parse()
+	if namespace == "" {
+		panic(fmt.Errorf("Option \"namespace\" can't be empty!"))
+	}
 }
 
 type loggerForGoZK struct{}
@@ -101,31 +110,28 @@ func main() {
 	if !leaderElect {
 		zkController.Run(ctx)
 	} else {
-		// TODO: Don't use environment variable to do this. Use flag and default value instead.
-		namespace := util.GetEnvOrDie(k8sutil2.EnvOperatorPodNamespace)
-		name := util.GetEnvOrDie(k8sutil2.EnvOperatorPodName)
-
 		id, err := os.Hostname()
 		if err != nil {
 			klog.Fatalf("failed to get hostname: %v", err)
 		}
 
-		rl, err := resourcelock.New(resourcelock.LeasesResourceLock,
-			namespace,
-			"zookeeper-operator",
-			nil,
-			cli.KubernetesInterface().CoordinationV1(),
-			resourcelock.ResourceLockConfig{
+		createLease(cli.KubernetesInterface())
+
+		rl := resourcelock.LeaseLock{
+			LeaseMeta: metav1.ObjectMeta{
+				Namespace: namespace,
+				Name:      COMPONENT_NAME,
+			},
+			Client: cli.KubernetesInterface().CoordinationV1(),
+			LockConfig: resourcelock.ResourceLockConfig{
 				Identity:      id,
-				EventRecorder: createRecorder(cli.KubernetesInterface(), name, namespace),
-			})
-		if err != nil {
-			klog.Fatalf("error creating lock: %v", err)
+				EventRecorder: createRecorder(cli.KubernetesInterface()),
+			},
 		}
 
 		leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
-			Lock:          rl,
-			LeaseDuration: 15 * time.Second,
+			Lock:          &rl,
+			LeaseDuration: 30 * time.Second,
 			RenewDeadline: 10 * time.Second,
 			RetryPeriod:   2 * time.Second,
 			Callbacks: leaderelection.LeaderCallbacks{
@@ -140,11 +146,26 @@ func main() {
 	panic("unreachable")
 }
 
-func createRecorder(kubecli kubernetes.Interface, name, namespace string) record.EventRecorder {
+func createRecorder(kubecli kubernetes.Interface) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(kubecli.CoreV1().RESTClient()).Events(namespace)})
-	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: name})
+	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: COMPONENT_NAME})
+}
+
+func createLease(kubecli kubernetes.Interface) {
+	// Set the labels so that it will be easier to clean all resources created by zookeeper-operator.
+	lease := &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      COMPONENT_NAME,
+			Labels:    map[string]string{"app": COMPONENT_NAME},
+		},
+	}
+	lease, err := kubecli.CoordinationV1().Leases(namespace).Create(lease)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		panic(err)
+	}
 }
 
 // TODO: consider manage CRDClient outside of operator. If so, refactor zkclient.Client: use zkclient.CRClient to replace
@@ -157,6 +178,11 @@ func initCRDOrDie(client k8sutil.CRDClient) {
 }
 
 func initCRD(client k8sutil.CRDClient) error {
+	// Set the labels so that it will be easier to clean all resources created by zookeeper-operator.
 	crd := k8sutil.NewCRD(apiextensionsv1.NamespaceScoped, api.SchemeGroupVersionKind, api.Plural, api.Short)
+	if crd.Labels == nil {
+		crd.Labels = map[string]string{}
+	}
+	crd.Labels["app"] = COMPONENT_NAME
 	return client.CreateAndWait(crd)
 }
