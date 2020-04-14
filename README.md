@@ -4,9 +4,9 @@
 
 ## Overview
 
-This project was forked and adapted from [Nuance-Mobility/zookeeper-operator][original-operator-url]
+This project is forked and adapted from [Nuance-Mobility/zookeeper-operator][original-operator-url]
 
-The Zookeeper operator manages Zookeeper clusters deployed to [Kubernetes][k8s-home] and automates tasks related to operating a Zookeeper cluster.
+The Zookeeper operator manages zookeeper clusters deployed to [Kubernetes][k8s-home] and automates tasks related to operating a Zookeeper cluster.
 
 - [Create and destroy](#create-and-destroy-a-zookeeper-cluster)
 - [Resize](#resize-a-zookeeper-cluster)

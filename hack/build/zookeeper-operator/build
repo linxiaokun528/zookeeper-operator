@@ -4,4 +4,5 @@
 
 current_path=$(cd `dirname $0`; pwd)
 ${current_path}/build_operator_binary
-docker rmi -f zookeeper-operator:0.1.0 && docker build -t zookeeper-operator:0.1.0 -f ./hack/build/zookeeper-operator/Dockerfile .
+docker rmi -f zookeeper-operator:0.1.0
+docker build -t zookeeper-operator:0.1.0 -f ./hack/build/zookeeper-operator/Dockerfile .

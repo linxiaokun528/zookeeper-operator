@@ -56,11 +56,11 @@ func ReconfigureCluster(hosts []string, desiredConfig []string) error {
 		return err
 	}
 	defer conn.Close()
-	klog.V(4).Infof("Pushing reconfig %v to zookeeper hosts: %v", desiredConfig, hosts)
+	klog.V(4).Infof("Pushing reconfig %s to zookeeper hosts: %s", desiredConfig, hosts)
 	_, err = conn.Reconfig(desiredConfig, -1)
 
 	if err != nil {
-		klog.Error("Failed to push reconfig %v to zookeeper hosts: %v", desiredConfig, hosts)
+		klog.Errorf("Failed to push reconfig %s to zookeeper hosts: %s", desiredConfig, hosts)
 		return err
 	}
 
