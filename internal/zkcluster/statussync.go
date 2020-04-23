@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog"
 
+	"zookeeper-operator/internal/util/zookeeper"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	k8sutil2 "zookeeper-operator/pkg/k8sutil"
 )
@@ -66,12 +67,56 @@ func (c *Cluster) syncCurrentMembers() (err error) {
 	if err != nil {
 		return err
 	}
-	runningPods, unreadyPods, stoppedPods := k8sutil2.GetPodsSeparatedByStatus(pods)
+	activePods, unreadyPods, stoppedPods := k8sutil2.GetPodsSeparatedByStatus(pods)
+
+	runningMemberAddress, err := c.getRunningMemberAddresses(activePods)
+	if err != nil {
+		return err
+	}
+
+	runningPods := []*v1.Pod{}
+	readyPods := []*v1.Pod{}
+
+	for _, pod := range activePods {
+		address := api.Address(pod.Name, pod.Namespace)
+		_, ok := runningMemberAddress[address]
+		if ok {
+			runningPods = append(runningPods, pod)
+		} else {
+			readyPods = append(readyPods, pod)
+		}
+	}
 
 	c.zkCR.Status.Members = api.NewZKCluster(c.zkCR.Namespace, c.zkCR.Name, c.zkCR.Status.CurrentVersion, runningPods,
-		unreadyPods, stoppedPods)
+		readyPods, unreadyPods, stoppedPods)
 
 	return nil
+}
+
+func (c *Cluster) getRunningMemberAddresses(activePods []*v1.Pod) (map[string]struct{}, error) {
+	if len(activePods) == 0 {
+		return map[string]struct{}{}, nil
+	}
+
+	addresses := make([]string, len(activePods))
+
+	for i, pod := range activePods {
+		addresses[i] = api.Address(pod.Name, pod.Namespace)
+	}
+
+	// If we don't get the real member from the zookeeper, then we are not able to handle the situation where
+	// "c.zkCR.Status.Members.Running" is modified by someone.
+	serverStatements, err := getconfig(c.zkCR.GetFullName(), addresses)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]struct{}, len(serverStatements))
+	for _, serverStatement := range serverStatements {
+		s := api.NewServerStatementFromString(serverStatement)
+		result[s.Address] = struct{}{}
+	}
+	return result, nil
 }
 
 func clusterListOpt(clusterName string) metav1.ListOptions {
@@ -89,4 +134,16 @@ func labelsForCluster(clusterName string) map[string]string {
 		"zookeeper_cluster": clusterName,
 		"app":               "zookeeper",
 	}
+}
+
+func getconfig(zkName string, addresses []string) (serverStatements []string, err error) {
+	klog.V(4).Infof("Getting config from zookeeper cluster %s with hosts %s...", zkName, addresses)
+
+	defer func() {
+		if err == nil {
+			klog.V(4).Infof("Get config from zookeeper cluster %s successfully: %s",
+				zkName, serverStatements)
+		}
+	}()
+	return zookeeper.GetClusterConfig(addresses)
 }

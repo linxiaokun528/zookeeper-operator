@@ -95,22 +95,24 @@ func (c *Cluster) sync() error {
 		return err
 	}
 
+	members := c.zkCR.Status.Members
+
 	defer func() {
 		// TODO: it's not always correct
-		c.zkCR.Status.Size = c.zkCR.Status.Members.Running.Size()
+		c.zkCR.Status.Size = members.Running.Size()
 	}()
 
-	if c.zkCR.Status.Members.Unready.Size() > 0 {
+	if members.Unready.Size() > 0 {
 		klog.Infof("Skip syncing for zookeeper cluster %v. Some pods are unready: %v",
-			c.zkCR.GetFullName(), c.zkCR.Status.Members.Unready.GetMemberNames())
+			c.zkCR.GetFullName(), members.Unready.GetMemberNames())
 		ReconcileFailed.WithLabelValues("not all pods are ready").Inc()
 		return nil
 	}
 
-	if c.zkCR.Status.Members.Stopped.Size() > 0 {
-		c.zkCR.Status.AppendRecoveringCondition(&c.zkCR.Status.Members.Stopped)
+	if members.Stopped.Size() > 0 {
+		c.zkCR.Status.AppendRecoveringCondition(&members.Stopped)
 		klog.Warningf("There are stopped members of zookeeper cluster %v: %v",
-			c.zkCR.GetFullName(), c.zkCR.Status.Members.Stopped)
+			c.zkCR.GetFullName(), members.Stopped)
 		err = c.ReplaceStoppedMembers()
 		if err != nil {
 			return err
@@ -118,8 +120,8 @@ func (c *Cluster) sync() error {
 		return nil
 	}
 
-	if c.zkCR.Status.Members.Running.Size() < c.zkCR.Spec.Size {
-		c.zkCR.Status.AppendScalingUpCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
+	if members.Ready.Size() == 0 && members.Running.Size() < c.zkCR.Spec.Size {
+		c.zkCR.Status.AppendScalingUpCondition(members.Running.Size(), c.zkCR.Spec.Size)
 
 		return c.beginScaleUp()
 	}
@@ -132,8 +134,8 @@ func (c *Cluster) sync() error {
 		c.zkCR.Status.SetRunningCondition()
 	}
 
-	if c.zkCR.Status.Members.Running.Size() > c.zkCR.Spec.Size {
-		c.zkCR.Status.AppendScalingDownCondition(c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
+	if members.Running.Size() > c.zkCR.Spec.Size {
+		c.zkCR.Status.AppendScalingDownCondition(members.Running.Size(), c.zkCR.Spec.Size)
 
 		err = c.scaleDown()
 		if err != nil {

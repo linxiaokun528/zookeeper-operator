@@ -23,7 +23,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
-	"zookeeper-operator/internal/util/k8sutil"
+	"zookeeper-operator/internal/util/k8s"
 )
 
 type clusterID struct {
@@ -62,21 +62,7 @@ func (m *Member) Version() string {
 }
 
 func (m *Member) Addr() string {
-	// If we use "<pod-name>.<service-name>" or "<pod-name>.<service-name>.<pod-namespace>.svc" as the pod domain,
-	// we may get an error like
-	// "can't resolve 'example-zookeeper-cluster-1.example-zookeeper-cluster': Name does not resolve" from this pod
-	// domain first. Even we can successfully resolve the pod domain one time, we may get the same
-	// "Name does not resolve" error the next time. So even if we have init container to make sure the pod domain
-	// apprears in kubedns, we can still get errors.
-	// But if we use "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>"(cluster-domain is
-	// something like "cluster.local") as the pod domain, we will always resolve the pod domain. Because
-	// "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>" is specified in file "/etc/hosts" of the pod.
-
-	// TODO: for the sake of debug, we set the value to the full form. But we should set it to <pod-name>.<service-name>
-	// to reduce the DNS search.
-	// "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>". But this will result in the failure to detect
-	// if the domain/endpoint is ready. We need to change this to "<pod-name>.<service-name>" in the final release.
-	return fmt.Sprintf("%s.%s.%s.svc.cluster.local", m.Name(), m.ClusterName(), m.Namespace())
+	return Address(m.Name(), m.Namespace())
 }
 
 func (m *Member) ID() int {
@@ -185,6 +171,8 @@ func (ms *Members) GetMemberNames() (res []string) {
 	for _, m := range ms.members {
 		res = append(res, m.Name())
 	}
+
+	sort.Strings(res)
 	return res
 }
 
@@ -246,11 +234,12 @@ type ZKCluster struct {
 	*clusterID `json:omit`
 	version    string  `json:"omit"`
 	Running    Members `json:"running"`
+	Ready      Members `json:"ready"`
 	Unready    Members `json:"unready"`
 	Stopped    Members `json:"stopped"`
 }
 
-func NewZKCluster(namespace, cluster_name, version string, runningPods, unreadyPods, stoppedPods []*v1.Pod) *ZKCluster {
+func NewZKCluster(namespace, cluster_name, version string, runningPods, readyPods, unreadyPods, stoppedPods []*v1.Pod) *ZKCluster {
 	id := &clusterID{
 		clusterName: cluster_name,
 		namespace:   namespace,
@@ -259,6 +248,7 @@ func NewZKCluster(namespace, cluster_name, version string, runningPods, unreadyP
 		clusterID: id,
 		version:   version,
 		Running:   podsToMembers(id, runningPods),
+		Ready:     podsToMembers(id, readyPods),
 		Unready:   podsToMembers(id, unreadyPods),
 		Stopped:   podsToMembers(id, stoppedPods),
 	}
@@ -275,7 +265,7 @@ func podsToMembers(id *clusterID, pods []*v1.Pod) Members {
 	return members
 }
 
-func getIdFromName(name string) int {
+func getIdAndClusterNameFromName(name string) (int, string) {
 	i := strings.LastIndex(name, "-")
 	if i == -1 {
 		panic(fmt.Sprintf("unexpected member name: %s", name))
@@ -287,14 +277,24 @@ func getIdFromName(name string) int {
 		panic(fmt.Sprintf("unexpected member name: %s", name))
 	}
 
+	return id, name[0:i]
+}
+
+func getIdFromName(name string) int {
+	id, _ := getIdAndClusterNameFromName(name)
 	return id
+}
+
+func getClusterNameFromName(name string) string {
+	_, clusterName := getIdAndClusterNameFromName(name)
+	return clusterName
 }
 
 func podToMember(clusterID *clusterID, pod *v1.Pod) *Member {
 	return &Member{
 		id:        getIdFromName(pod.Name),
 		clusterID: clusterID,
-		version:   k8sutil.GetZookeeperVersion(pod),
+		version:   k8s.GetZookeeperVersion(pod),
 	}
 }
 
@@ -376,6 +376,25 @@ func (z *ZKCluster) nextMemberID() int {
 func (z *ZKCluster) setClusterID(id *clusterID) {
 	z.clusterID = id
 	z.Running.setClusterID(id)
+	z.Ready.setClusterID(id)
 	z.Unready.setClusterID(id)
 	z.Stopped.setClusterID(id)
+}
+
+func Address(name, namespace string) string {
+	// If we use "<pod-name>.<service-name>" or "<pod-name>.<service-name>.<pod-namespace>.svc" as the pod domain,
+	// we may get an error like
+	// "can't resolve 'example-zookeeper-cluster-1.example-zookeeper-cluster': Name does not resolve" from this pod
+	// domain first. Even we can successfully resolve the pod domain one time, we may get the same
+	// "Name does not resolve" error the next time. So even if we have init container to make sure the pod domain
+	// apprears in kubedns, we can still get errors.
+	// But if we use "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>"(cluster-domain is
+	// something like "cluster.local") as the pod domain, we will always resolve the pod domain. Because
+	// "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>" is specified in file "/etc/hosts" of the pod.
+
+	// TODO: for the sake of debug, we set the value to the full form. But we should set it to <pod-name>.<service-name>
+	// to reduce the DNS search.
+	// "<pod-name>.<service-name>.<pod-namespace>.svc.<cluster-domain>". But this will result in the failure to detect
+	// if the domain/endpoint is ready. We need to change this to "<pod-name>.<service-name>" in the final release.
+	return fmt.Sprintf("%s.%s.%s.svc.cluster.local", name, getClusterNameFromName(name), namespace)
 }

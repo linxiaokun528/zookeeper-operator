@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package zookeeperutil
+package zookeeper
 
 import (
 	"sort"
@@ -21,8 +21,6 @@ import (
 
 	"k8s.io/klog"
 
-	/* TODO: The error message of this ZK zkclient is too simple. Maybe change a zk zkclient in the future.
-	 */
 	"github.com/samuel/go-zookeeper/zk"
 )
 

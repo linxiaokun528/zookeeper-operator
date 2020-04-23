@@ -8,7 +8,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"zookeeper-operator/internal/util/k8sutil"
+	k8sutil "zookeeper-operator/internal/util/k8s"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 

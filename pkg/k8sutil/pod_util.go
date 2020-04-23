@@ -33,12 +33,12 @@ func getPodReadyCondition(status *v1.PodStatus) *v1.PodCondition {
 	return nil
 }
 
-func GetPodsSeparatedByStatus(pods []*v1.Pod) (running, unready, stopped []*v1.Pod) {
+func GetPodsSeparatedByStatus(pods []*v1.Pod) (active, unready, stopped []*v1.Pod) {
 	for _, pod := range pods {
 		switch pod.Status.Phase {
 		case v1.PodRunning:
 			if IsPodReady(pod) {
-				running = append(running, pod)
+				active = append(active, pod)
 			} else {
 				unready = append(unready, pod)
 			}
@@ -49,5 +49,5 @@ func GetPodsSeparatedByStatus(pods []*v1.Pod) (running, unready, stopped []*v1.P
 		}
 	}
 
-	return running, unready, stopped
+	return active, unready, stopped
 }

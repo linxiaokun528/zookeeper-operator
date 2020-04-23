@@ -60,7 +60,7 @@ func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 	// TODO: @MDF: Add PV support
 	/*
 		if c.isPodPVEnabled() {
-			err = c.removePVC(k8sutil.PVCNameFromMember(toRemove.Name))
+			err = c.removePVC(k8s.PVCNameFromMember(toRemove.Name))
 			if err != nil {
 				return err
 			}
