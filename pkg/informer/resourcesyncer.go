@@ -1,12 +1,10 @@
 package informer
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -104,22 +102,13 @@ func newResourceSyncer(informer sigcache.Informer, gvr schema.GroupVersionResour
 		lister:   lister,
 	}
 
-	eventQueue := newEventConsumingQueue(result.consume)
+	eventQueue := newEventConsumingQueue(lister, result.consume)
 	adder := resourceRateLimitingAdder{
 		eventQueue: eventQueue,
-		keyGetter:  result.objToKey,
 	}
 	result.syncer = newSyncerFunc(lister, &adder)
 	result.eventQueue = eventQueue
 	return &result
-}
-
-func (i *resourceSyncer) objToKey(obj interface{}) string {
-	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't get key for object %+v: %v", obj, err))
-	}
-	return key
 }
 
 func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
@@ -128,7 +117,7 @@ func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
 
 	if !cache.WaitForNamedCacheSync(
 		fmt.Sprintf("%v", i.gvr),
-		context.TODO().Done(), i.informer.HasSynced) {
+		stopCh, i.informer.HasSynced) {
 		return
 	}
 
@@ -142,18 +131,18 @@ func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
 }
 
 func (i *resourceSyncer) onAdd(obj interface{}) {
-	klog.Info(fmt.Sprintf("Receive a creation event for %s", i.objToKey(obj)))
+	klog.Info(fmt.Sprintf("Receive a creation event for %s", objToKey(obj)))
 	i.eventQueue.Add(&event{
 		Type: watch.Modified,
-		key:  i.objToKey(obj),
+		obj:  obj.(runtime.Object),
 	})
 }
 
 func (i *resourceSyncer) onUpdate(oldObj, newObj interface{}) {
-	klog.Info(fmt.Sprintf("Receive a update event for %s", i.objToKey(newObj)))
+	klog.Info(fmt.Sprintf("Receive a update event for %s", objToKey(newObj)))
 	i.eventQueue.Add(&event{
 		Type: watch.Modified,
-		key:  i.objToKey(newObj),
+		obj:  newObj.(runtime.Object),
 	})
 }
 
@@ -162,41 +151,26 @@ func (i *resourceSyncer) onDelete(obj interface{}) {
 	if ok {
 		obj = tombstone.Obj
 	}
-	klog.Info(fmt.Sprintf("Receive a deletion event for %s", i.objToKey(obj)))
+	klog.Info(fmt.Sprintf("Receive a deletion event for %s", objToKey(obj)))
 
 	if i.syncer.Delete != nil {
 		i.eventQueue.Add(&event{
 			Type: watch.Deleted,
-			key:  i.objToKey(obj),
+			obj:  obj.(runtime.Object),
 		})
 	}
 }
 
 func (i *resourceSyncer) consume(item interface{}) (bool, error) {
 	event := item.(*event)
-	ns, name, err := cache.SplitMetaNamespaceKey(event.key)
-
-	if err != nil {
-		return false, err
-	}
-
-	var obj runtime.Object
-	if ns == "" {
-		obj, err = i.lister.Get(name)
-	} else {
-		obj, err = i.lister.ByNamespace(ns).Get(name)
-	}
 
 	if event.Type == watch.Deleted {
-		return i.syncer.Delete(obj)
+		return i.syncer.Delete(event.obj)
 	} else {
-		if err != nil {
-			return false, apierrors.NewNotFound(i.gvr.GroupResource(), name)
-		}
-		if obj.(metav1.Object).GetDeletionTimestamp() != nil {
+		if event.obj.(metav1.Object).GetDeletionTimestamp() != nil {
 			return true, nil
 		}
 
-		return i.syncer.Sync(obj.DeepCopyObject())
+		return i.syncer.Sync(event.obj.DeepCopyObject())
 	}
 }

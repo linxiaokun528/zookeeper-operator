@@ -18,17 +18,22 @@ import (
 	"context"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
+	"k8s.io/kubernetes/pkg/controller"
 
 	client2 "zookeeper-operator/internal/client"
 	"zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/informer"
 )
 
-const resyncTime = 30 * time.Second
+const resyncTime = 2 * time.Minute
 
 type Controller struct {
 	client client2.Client
@@ -43,13 +48,41 @@ func New(client client2.Client) *Controller {
 func (c *Controller) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
-	resourceSyncer := c.newResourceSyncerForZookeeper(ctx)
-	resourceSyncer.Run(5, ctx.Done())
+	expectations := controller.NewControllerExpectations()
 
-	// TODO: add a pod informer to watch related pods. And then set resyncTime to 2 minutes.
+	podInformer := c.newZKPodInformer(expectations)
+	go podInformer.Run(ctx.Done())
+	if !cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
+		klog.Errorf("Failed to sync pods for zookeeper clusters!")
+		return
+	}
+
+	resourceSyncer := c.newResourceSyncerForZookeeper(expectations, ctx)
+	resourceSyncer.Run(5, ctx.Done())
 }
 
-func (c *Controller) newResourceSyncerForZookeeper(ctx context.Context) informer.ResourceSyncer {
+func (c *Controller) newZKPodInformer(
+	expectations controller.ControllerExpectationsInterface) cache.Controller {
+	source := cache.NewFilteredListWatchFromClient(
+		c.client.KubernetesInterface().CoreV1().RESTClient(),
+		string(v1.ResourcePods),
+		metav1.NamespaceAll,
+		func(options *metav1.ListOptions) {
+			options.LabelSelector = labels.SelectorFromSet(map[string]string{"app": "zookeeper"}).String()
+		},
+	)
+	podHandler := ZkPodEventHandler{
+		expectations: expectations,
+		cli:          c.client.KubernetesInterface().CoreV1(),
+	}
+
+	_, podInformer := cache.NewInformer(source, &v1.Pod{}, resyncTime, &podHandler)
+
+	return podInformer
+}
+
+func (c *Controller) newResourceSyncerForZookeeper(expections controller.ControllerExpectationsInterface,
+	ctx context.Context) informer.ResourceSyncer {
 	scheme := runtime.NewScheme()
 	err := clientgoscheme.AddToScheme(scheme)
 	if err != nil {
@@ -69,12 +102,18 @@ func (c *Controller) newResourceSyncerForZookeeper(ctx context.Context) informer
 	resourceSyncer := factory.ResourceSyncer(&v1alpha1.ZookeeperCluster{},
 		func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) informer.Syncer {
 			zkSyncer := zookeeperSyncer{
-				adder:  adder,
-				client: c.client,
+				adder:      adder,
+				client:     c.client,
+				expections: expections,
 			}
 
 			return informer.Syncer{
 				Sync: zkSyncer.sync,
+				Delete: func(obj runtime.Object) (bool, error) {
+					cr := obj.(*v1alpha1.ZookeeperCluster)
+					expections.DeleteExpectations(cr.GetFullName())
+					return true, nil
+				},
 			}
 		})
 

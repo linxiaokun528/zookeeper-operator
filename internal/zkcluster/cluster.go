@@ -21,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetretry "k8s.io/client-go/util/retry"
 	"k8s.io/klog"
+	"k8s.io/kubernetes/pkg/controller"
 
 	client2 "zookeeper-operator/internal/client"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
@@ -28,16 +29,19 @@ import (
 )
 
 type Cluster struct {
-	client client2.CRClient
-	zkCR   *api.ZookeeperCluster
-	locker sync.Locker
+	client       client2.CRClient
+	zkCR         *api.ZookeeperCluster
+	locker       sync.Locker
+	expectations controller.ControllerExpectationsInterface
 }
 
-func New(client client2.CRClient, zkCR *api.ZookeeperCluster) *Cluster {
+func New(client client2.CRClient, zkCR *api.ZookeeperCluster,
+	expections controller.ControllerExpectationsInterface) *Cluster {
 	c := &Cluster{
-		client: client,
-		zkCR:   zkCR,
-		locker: &sync.Mutex{},
+		client:       client,
+		zkCR:         zkCR,
+		locker:       &sync.Mutex{},
+		expectations: expections,
 	}
 
 	return c
@@ -79,6 +83,10 @@ func (c *Cluster) updateStatus() error {
 func (c *Cluster) sync() error {
 	klog.Infof("Start syncing zookeeper cluster %v", c.zkCR.GetFullName())
 	defer klog.Infof("Finish syncing zookeeper cluster %v", c.zkCR.GetFullName())
+
+	if _, ok, err := c.expectations.GetExpectations(c.zkCR.GetFullName()); !ok && err == nil {
+		c.expectations.SetExpectations(c.zkCR.GetFullName(), 0, 0)
+	}
 
 	c.zkCR.SetDefaults()
 
@@ -126,7 +134,7 @@ func (c *Cluster) sync() error {
 		return c.beginScaleUp()
 	}
 
-	if c.zkCR.Status.GetCurrentCondition().Type == api.ClusterScalingUp {
+	if c.zkCR.Status.GetCurrentCondition().Type == api.ClusterScalingUp || members.Ready.Size() > 0 {
 		err := c.finishScaleUp()
 		if err != nil {
 			return err

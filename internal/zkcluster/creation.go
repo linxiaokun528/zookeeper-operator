@@ -39,7 +39,7 @@ func (c *Cluster) logClusterCreation() {
 		return
 	}
 
-	klog.Info("Creating zookeeper cluster %s with Spec: ", c.zkCR.Name)
+	klog.Infof("Creating zookeeper cluster %s with Spec: ", c.zkCR.Name)
 	for _, m := range strings.Split(string(specBytes), "\n") {
 		klog.Info(m)
 	}
