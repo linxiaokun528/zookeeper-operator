@@ -62,7 +62,7 @@ func (c *Cluster) finishScaleUp() (err error) {
 	err = c.reconfig()
 	if err == nil {
 		c.zkCR.Status.Members.Running.Update(&c.zkCR.Status.Members.Ready)
-		c.zkCR.Status.Members.Ready = api.Members{}
+		c.zkCR.Status.Members.Ready.Clear()
 	}
 	return err
 }

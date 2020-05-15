@@ -100,19 +100,21 @@ func (c *Controller) newResourceSyncerForZookeeper(expections controller.Control
 	go factory.Start(ctx.Done())
 
 	resourceSyncer := factory.ResourceSyncer(&v1alpha1.ZookeeperCluster{},
-		func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) informer.Syncer {
+		func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs {
 			zkSyncer := zookeeperSyncer{
 				adder:      adder,
 				client:     c.client,
 				expections: expections,
 			}
 
-			return informer.Syncer{
-				Sync: zkSyncer.sync,
-				Delete: func(obj runtime.Object) (bool, error) {
+			return cache.ResourceEventHandlerFuncs{
+				AddFunc: zkSyncer.sync,
+				UpdateFunc: func(oldObj, newObj interface{}) {
+					zkSyncer.sync(newObj)
+				},
+				DeleteFunc: func(obj interface{}) {
 					cr := obj.(*v1alpha1.ZookeeperCluster)
 					expections.DeleteExpectations(cr.GetFullName())
-					return true, nil
 				},
 			}
 		})

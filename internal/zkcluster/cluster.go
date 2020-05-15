@@ -106,7 +106,6 @@ func (c *Cluster) sync() error {
 	members := c.zkCR.Status.Members
 
 	defer func() {
-		// TODO: it's not always correct
 		c.zkCR.Status.Size = members.Running.Size()
 	}()
 

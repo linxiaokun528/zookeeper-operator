@@ -17,19 +17,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
-type syncFunc func(obj runtime.Object) (bool, error)
-
-type Syncer struct {
-	Sync   syncFunc
-	Delete syncFunc
-}
+type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs
 
 type ResourceSyncerFactory interface {
 	ResourceSyncer(obj runtime.Object, newSyncerFunc NewSyncerFunc) ResourceSyncer
 	Start(stopCh <-chan struct{}) error
 }
-
-type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) Syncer
 
 type resourceSyncerFactory struct {
 	config *rest.Config
@@ -84,7 +77,7 @@ type ResourceSyncer interface {
 
 type resourceSyncer struct {
 	eventQueue *eventConsumingQueue
-	syncer     Syncer
+	handler    cache.ResourceEventHandlerFuncs
 
 	gvr      schema.GroupVersionResource
 	informer sigcache.Informer
@@ -106,7 +99,9 @@ func newResourceSyncer(informer sigcache.Informer, gvr schema.GroupVersionResour
 	adder := resourceRateLimitingAdder{
 		eventQueue: eventQueue,
 	}
-	result.syncer = newSyncerFunc(lister, &adder)
+	handler := newSyncerFunc(lister, &adder)
+
+	result.handler = handler
 	result.eventQueue = eventQueue
 	return &result
 }
@@ -132,18 +127,27 @@ func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
 
 func (i *resourceSyncer) onAdd(obj interface{}) {
 	klog.Info(fmt.Sprintf("Receive a creation event for %s", objToKey(obj)))
+	if i.handler.AddFunc == nil {
+		return
+	}
+
 	i.eventQueue.Add(&event{
-		Type: watch.Modified,
-		obj:  obj.(runtime.Object),
+		eventType: watch.Added,
+		newObj:    obj.(runtime.Object),
 	})
 }
 
 func (i *resourceSyncer) onUpdate(oldObj, newObj interface{}) {
 	klog.Info(fmt.Sprintf("Receive a update event for %s", objToKey(newObj)))
+	if i.handler.UpdateFunc == nil {
+		return
+	}
+
 	i.eventQueue.Add(&event{
-		Type: watch.Modified,
-		obj:  newObj.(runtime.Object),
+		eventType: watch.Modified,
+		newObj:    newObj.(runtime.Object),
 	})
+
 }
 
 func (i *resourceSyncer) onDelete(obj interface{}) {
@@ -153,24 +157,32 @@ func (i *resourceSyncer) onDelete(obj interface{}) {
 	}
 	klog.Info(fmt.Sprintf("Receive a deletion event for %s", objToKey(obj)))
 
-	if i.syncer.Delete != nil {
-		i.eventQueue.Add(&event{
-			Type: watch.Deleted,
-			obj:  obj.(runtime.Object),
-		})
+	if i.handler.DeleteFunc == nil {
+		return
 	}
+
+	i.eventQueue.Add(&event{
+		eventType: watch.Deleted,
+		newObj:    obj.(runtime.Object),
+	})
+
 }
 
-func (i *resourceSyncer) consume(item interface{}) (bool, error) {
+func (i *resourceSyncer) consume(item interface{}) {
 	event := item.(*event)
 
-	if event.Type == watch.Deleted {
-		return i.syncer.Delete(event.obj)
+	if event.eventType == watch.Deleted {
+		i.handler.OnDelete(event.newObj)
 	} else {
-		if event.obj.(metav1.Object).GetDeletionTimestamp() != nil {
-			return true, nil
+		// Actually, I don't think this will happen.
+		if event.newObj.(metav1.Object).GetDeletionTimestamp() != nil {
+			return
 		}
 
-		return i.syncer.Sync(event.obj.DeepCopyObject())
+		if event.eventType == watch.Modified {
+			i.handler.OnUpdate(event.oldObj, event.newObj)
+		} else {
+			i.handler.OnAdd(event.newObj)
+		}
 	}
 }

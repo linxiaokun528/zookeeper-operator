@@ -3,7 +3,7 @@ package controller
 import (
 	"time"
 
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/controller"
 
 	client2 "zookeeper-operator/internal/client"
@@ -20,7 +20,7 @@ type zookeeperSyncer struct {
 	expections controller.ControllerExpectationsInterface
 }
 
-func (z *zookeeperSyncer) sync(obj runtime.Object) (bool, error) {
+func (z *zookeeperSyncer) sync(obj interface{}) {
 	cr := obj.(*api.ZookeeperCluster)
 	zkCluster := zkcluster.New(z.client.GetCRClient(cr.Namespace), cr, z.expections)
 	defer func() {
@@ -31,15 +31,17 @@ func (z *zookeeperSyncer) sync(obj runtime.Object) (bool, error) {
 
 	start := time.Now()
 
-	rerr := zkCluster.SyncAndUpdateStatus()
+	err := zkCluster.SyncAndUpdateStatus()
 
 	zkcluster.ReconcileHistogram.WithLabelValues(cr.Name).Observe(
 		time.Since(start).Seconds())
 
-	if rerr != nil {
-		zkcluster.ReconcileFailed.WithLabelValues(rerr.Error()).Inc()
-		return false, rerr
+	if err != nil {
+		klog.Errorf("Error happend when syncing zookeeper cluster %s: %s", cr.GetFullName(), err.Error())
+		zkcluster.ReconcileFailed.WithLabelValues(err.Error()).Inc()
+		z.adder.AddRateLimited(cr)
+	} else {
+		z.adder.Forget(cr)
 	}
 
-	return true, nil
 }

@@ -1,0 +1,23 @@
+# Only needed for developing zookeeper operator locally
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-service
+spec:
+  type: NodePort
+  selector:
+    app: zookeeper
+  ports:
+  - name: client
+    port: 2181
+    targetPort: 2181
+    nodePort: 2181
+  - name: peer
+    port: 2888
+    targetPort: 2888
+    nodePort: 2888
+  - name: server
+    port: 3888
+    targetPort: 3888
+    nodePort: 3888
