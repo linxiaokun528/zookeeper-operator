@@ -3,5 +3,5 @@ kind: "ZookeeperCluster"
 metadata:
   name: "example-zookeeper-cluster"
 spec:
-  size: 1
+  size: 3
   version: "3.5.7"

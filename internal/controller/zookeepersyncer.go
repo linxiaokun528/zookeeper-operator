@@ -3,7 +3,8 @@ package controller
 import (
 	"time"
 
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog"
+	"k8s.io/kubernetes/pkg/controller"
 
 	client2 "zookeeper-operator/internal/client"
 	"zookeeper-operator/internal/zkcluster"
@@ -14,13 +15,14 @@ import (
 const retryWaitTime = 30 * time.Second
 
 type zookeeperSyncer struct {
-	adder  informer.ResourceRateLimitingAdder
-	client client2.Client
+	adder      informer.ResourceRateLimitingAdder
+	client     client2.Client
+	expections controller.ControllerExpectationsInterface
 }
 
-func (z *zookeeperSyncer) sync(obj runtime.Object) (bool, error) {
+func (z *zookeeperSyncer) sync(obj interface{}) {
 	cr := obj.(*api.ZookeeperCluster)
-	zkCluster := zkcluster.New(z.client.GetCRClient(cr.Namespace), cr)
+	zkCluster := zkcluster.New(z.client.GetCRClient(cr.Namespace), cr, z.expections)
 	defer func() {
 		if !zkCluster.IsFinished() {
 			z.adder.AddAfter(cr, retryWaitTime)
@@ -29,15 +31,17 @@ func (z *zookeeperSyncer) sync(obj runtime.Object) (bool, error) {
 
 	start := time.Now()
 
-	rerr := zkCluster.SyncAndUpdateStatus()
+	err := zkCluster.SyncAndUpdateStatus()
 
 	zkcluster.ReconcileHistogram.WithLabelValues(cr.Name).Observe(
 		time.Since(start).Seconds())
 
-	if rerr != nil {
-		zkcluster.ReconcileFailed.WithLabelValues(rerr.Error()).Inc()
-		return false, rerr
+	if err != nil {
+		klog.Errorf("Error happend when syncing zookeeper cluster %s: %s", cr.GetFullName(), err.Error())
+		zkcluster.ReconcileFailed.WithLabelValues(err.Error()).Inc()
+		z.adder.AddRateLimited(cr)
+	} else {
+		z.adder.Forget(cr)
 	}
 
-	return true, nil
 }

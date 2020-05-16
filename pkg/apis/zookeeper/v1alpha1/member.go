@@ -124,6 +124,10 @@ func (ms *Members) Remove(id int) {
 	delete(ms.members, id)
 }
 
+func (ms *Members) Clear() {
+	ms.members = map[int]*Member{}
+}
+
 func (ms *Members) Update(m *Members) {
 	if m.clusterID != ms.clusterID {
 		panic(fmt.Sprintf("Can't update members of %s with members of %s",

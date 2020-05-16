@@ -30,6 +30,11 @@ func (c *Cluster) scaleDown() (err error) {
 	errCh := make(chan error, membersToRemove.Size())
 	wait := sync.WaitGroup{}
 	wait.Add(membersToRemove.Size())
+
+	// To prevent from rewriting existing expectations, don't use "c.expectations.DeleteExpectations".
+	// We also set expectation in podEventHandler.
+	c.expectations.RaiseExpectations(c.zkCR.GetFullName(), 0, membersToRemove.Size())
+
 	for _, m := range membersToRemove.GetElements() {
 		go func(member *api.Member) {
 			defer wait.Done()

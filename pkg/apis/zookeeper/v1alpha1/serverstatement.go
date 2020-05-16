@@ -78,7 +78,7 @@ func NewServerStatementFromString(serverStatement string) *ServerStatement {
 	}
 }
 
-func (s ServerStatement) String() {
-	fmt.Printf("server.%d=%s:%d:%d:%s;%s:%d", s.Id, s.Address, s.QuorumPort, s.LeaderElectionPort, s.Role,
-		s.ClientPortAddress, s.ClientPort)
+func (s ServerStatement) String() string {
+	return fmt.Sprintf("server.%d=%s:%d:%d:%s;%s:%d", s.Id, s.Address, s.QuorumPort,
+		s.LeaderElectionPort, s.Role, s.ClientPortAddress, s.ClientPort)
 }

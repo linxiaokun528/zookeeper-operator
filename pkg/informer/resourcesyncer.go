@@ -1,12 +1,10 @@
 package informer
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -19,19 +17,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
-type syncFunc func(obj runtime.Object) (bool, error)
-
-type Syncer struct {
-	Sync   syncFunc
-	Delete syncFunc
-}
+type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs
 
 type ResourceSyncerFactory interface {
 	ResourceSyncer(obj runtime.Object, newSyncerFunc NewSyncerFunc) ResourceSyncer
 	Start(stopCh <-chan struct{}) error
 }
-
-type NewSyncerFunc func(lister cache.GenericLister, adder ResourceRateLimitingAdder) Syncer
 
 type resourceSyncerFactory struct {
 	config *rest.Config
@@ -86,7 +77,7 @@ type ResourceSyncer interface {
 
 type resourceSyncer struct {
 	eventQueue *eventConsumingQueue
-	syncer     Syncer
+	handler    cache.ResourceEventHandlerFuncs
 
 	gvr      schema.GroupVersionResource
 	informer sigcache.Informer
@@ -104,22 +95,15 @@ func newResourceSyncer(informer sigcache.Informer, gvr schema.GroupVersionResour
 		lister:   lister,
 	}
 
-	eventQueue := newEventConsumingQueue(result.consume)
+	eventQueue := newEventConsumingQueue(lister, result.consume)
 	adder := resourceRateLimitingAdder{
 		eventQueue: eventQueue,
-		keyGetter:  result.objToKey,
 	}
-	result.syncer = newSyncerFunc(lister, &adder)
+	handler := newSyncerFunc(lister, &adder)
+
+	result.handler = handler
 	result.eventQueue = eventQueue
 	return &result
-}
-
-func (i *resourceSyncer) objToKey(obj interface{}) string {
-	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't get key for object %+v: %v", obj, err))
-	}
-	return key
 }
 
 func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
@@ -128,7 +112,7 @@ func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
 
 	if !cache.WaitForNamedCacheSync(
 		fmt.Sprintf("%v", i.gvr),
-		context.TODO().Done(), i.informer.HasSynced) {
+		stopCh, i.informer.HasSynced) {
 		return
 	}
 
@@ -142,19 +126,28 @@ func (i *resourceSyncer) Run(workerNum int, stopCh <-chan struct{}) {
 }
 
 func (i *resourceSyncer) onAdd(obj interface{}) {
-	klog.Info(fmt.Sprintf("Receive a creation event for %s", i.objToKey(obj)))
+	klog.Info(fmt.Sprintf("Receive a creation event for %s", objToKey(obj)))
+	if i.handler.AddFunc == nil {
+		return
+	}
+
 	i.eventQueue.Add(&event{
-		Type: watch.Modified,
-		key:  i.objToKey(obj),
+		eventType: watch.Added,
+		newObj:    obj.(runtime.Object),
 	})
 }
 
 func (i *resourceSyncer) onUpdate(oldObj, newObj interface{}) {
-	klog.Info(fmt.Sprintf("Receive a update event for %s", i.objToKey(newObj)))
+	klog.Info(fmt.Sprintf("Receive a update event for %s", objToKey(newObj)))
+	if i.handler.UpdateFunc == nil {
+		return
+	}
+
 	i.eventQueue.Add(&event{
-		Type: watch.Modified,
-		key:  i.objToKey(newObj),
+		eventType: watch.Modified,
+		newObj:    newObj.(runtime.Object),
 	})
+
 }
 
 func (i *resourceSyncer) onDelete(obj interface{}) {
@@ -162,41 +155,34 @@ func (i *resourceSyncer) onDelete(obj interface{}) {
 	if ok {
 		obj = tombstone.Obj
 	}
-	klog.Info(fmt.Sprintf("Receive a deletion event for %s", i.objToKey(obj)))
+	klog.Info(fmt.Sprintf("Receive a deletion event for %s", objToKey(obj)))
 
-	if i.syncer.Delete != nil {
-		i.eventQueue.Add(&event{
-			Type: watch.Deleted,
-			key:  i.objToKey(obj),
-		})
+	if i.handler.DeleteFunc == nil {
+		return
 	}
+
+	i.eventQueue.Add(&event{
+		eventType: watch.Deleted,
+		newObj:    obj.(runtime.Object),
+	})
+
 }
 
-func (i *resourceSyncer) consume(item interface{}) (bool, error) {
+func (i *resourceSyncer) consume(item interface{}) {
 	event := item.(*event)
-	ns, name, err := cache.SplitMetaNamespaceKey(event.key)
 
-	if err != nil {
-		return false, err
-	}
-
-	var obj runtime.Object
-	if ns == "" {
-		obj, err = i.lister.Get(name)
+	if event.eventType == watch.Deleted {
+		i.handler.OnDelete(event.newObj)
 	} else {
-		obj, err = i.lister.ByNamespace(ns).Get(name)
-	}
-
-	if event.Type == watch.Deleted {
-		return i.syncer.Delete(obj)
-	} else {
-		if err != nil {
-			return false, apierrors.NewNotFound(i.gvr.GroupResource(), name)
-		}
-		if obj.(metav1.Object).GetDeletionTimestamp() != nil {
-			return true, nil
+		// Actually, I don't think this will happen.
+		if event.newObj.(metav1.Object).GetDeletionTimestamp() != nil {
+			return
 		}
 
-		return i.syncer.Sync(obj.DeepCopyObject())
+		if event.eventType == watch.Modified {
+			i.handler.OnUpdate(event.oldObj, event.newObj)
+		} else {
+			i.handler.OnAdd(event.newObj)
+		}
 	}
 }
