@@ -82,10 +82,10 @@ func NewCachedInformer(ctx context.Context, config *rest.Config, scheme *runtime
 	}
 
 	cache, err := sigcache.New(config, opt)
-	go cache.Start(ctx.Done())
 	if err != nil {
 		return nil, err
 	}
+	go cache.Start(ctx.Done())
 
 	return &cachedInformer{config: config, cache: cache, scheme: scheme, ctx: ctx}, nil
 }

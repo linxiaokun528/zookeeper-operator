@@ -1,6 +1,7 @@
 package zkcluster
 
 import (
+	"fmt"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog"
 	"sync"
@@ -31,10 +32,6 @@ func (c *Cluster) scaleDown() (err error) {
 	wait := sync.WaitGroup{}
 	wait.Add(membersToRemove.Size())
 
-	// To prevent from rewriting existing expectations, don't use "c.expectations.DeleteExpectations".
-	// We also set expectation in podEventHandler.
-	c.expectations.RaiseExpectations(c.zkCR.GetFullName(), 0, membersToRemove.Size())
-
 	for _, m := range membersToRemove.GetElements() {
 		go func(member *api.Member) {
 			defer wait.Done()
@@ -55,11 +52,12 @@ func (c *Cluster) scaleDown() (err error) {
 
 // Remember to reconfig the zookeeper zkCR before invoking this function
 func (c *Cluster) removeOneMember(m *api.Member) (err error) {
+	podName := fmt.Sprintf("%s/%s", c.zkCR.Namespace, m.Name())
+	c.podsToDelete.Add(podName)
 	if err := c.client.Pod().Delete(m.Name(), nil); err != nil {
-		if err != nil {
-			if !apierrors.IsNotFound(err) {
-				return err
-			}
+		c.podsToDelete.Remove(podName)
+		if !apierrors.IsNotFound(err) {
+			return err
 		}
 	}
 	// TODO: @MDF: Add PV support

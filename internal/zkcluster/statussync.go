@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog"
 
@@ -14,14 +13,14 @@ import (
 
 func (c *Cluster) listPods() (pods []*v1.Pod, err error) {
 	// TODO: If we use shared informer for pod, then use lister to get the pods
-	podList, err := c.client.Pod().List(clusterListOpt(c.zkCR.Name))
+	objs, err := c.podLister.List(clusterSelector(c.zkCR.Name))
 	if err != nil {
 		ReconcileFailed.WithLabelValues("failed to list pods").Inc()
 		return nil, fmt.Errorf("Failed to list pods for ZookeeperCluster %v:%v: %v", c.zkCR.Namespace, c.zkCR.Name, err)
 	}
 
-	for i := range podList.Items {
-		pod := &podList.Items[i]
+	for _, obj := range objs {
+		pod := obj.(*v1.Pod)
 		// Avoid polling deleted pods. k8s issue where deleted pods would sometimes show the status Pending
 		// See https://github.com/coreos/etcd-operator/issues/1693
 		if pod.DeletionTimestamp != nil {
@@ -89,12 +88,6 @@ func (c *Cluster) syncCurrentMembers() (err error) {
 		readyPods, unreadyPods, stoppedPods)
 
 	return nil
-}
-
-func clusterListOpt(clusterName string) metav1.ListOptions {
-	return metav1.ListOptions{
-		LabelSelector: clusterSelector(clusterName).String(),
-	}
 }
 
 func clusterSelector(clusterName string) labels.Selector {

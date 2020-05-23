@@ -34,9 +34,6 @@ func (c *Cluster) beginScaleUp() (err error) {
 		lastCommittedMembers = newMembers
 	}
 
-	// To prevent from rewriting existing expectations, don't use "c.expectations.ExpectCreations".
-	// We also set expectation in podEventHandler.
-	c.expectations.RaiseExpectations(c.zkCR.GetFullName(), newMembers.Size(), 0)
 	for _, member := range newMembers.GetElements() {
 		go func(newMember *api.Member, lastCommittedMembers *api.Members) {
 			defer wait.Done()

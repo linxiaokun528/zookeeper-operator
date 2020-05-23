@@ -3,8 +3,10 @@ package controller
 import (
 	"time"
 
+	"gopkg.in/fatih/set.v0"
+	"k8s.io/client-go/tools/cache"
+
 	"k8s.io/klog"
-	"k8s.io/kubernetes/pkg/controller"
 
 	client2 "zookeeper-operator/internal/client"
 	"zookeeper-operator/internal/zkcluster"
@@ -15,14 +17,15 @@ import (
 const retryWaitTime = 30 * time.Second
 
 type zookeeperSyncer struct {
-	adder      informer.ResourceRateLimitingAdder
-	client     client2.Client
-	expections controller.ControllerExpectationsInterface
+	adder        informer.ResourceRateLimitingAdder
+	client       client2.Client
+	podLister    cache.GenericLister
+	podsToDelete set.Interface
 }
 
 func (z *zookeeperSyncer) sync(obj interface{}) {
 	cr := obj.(*api.ZookeeperCluster)
-	zkCluster := zkcluster.New(z.client.GetCRClient(cr.Namespace), cr, z.expections)
+	zkCluster := zkcluster.New(z.client.GetCRClient(cr.Namespace), cr, z.podLister, z.podsToDelete)
 	var err error = nil
 	defer func() {
 		if err == nil && !zkCluster.IsFinished() {
