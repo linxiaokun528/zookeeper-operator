@@ -18,18 +18,16 @@ import (
 	"context"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/controller"
 
 	client2 "zookeeper-operator/internal/client"
 	"zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
+	apis "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/informer"
 )
 
@@ -48,41 +46,19 @@ func New(client client2.Client) *Controller {
 func (c *Controller) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
+	cachedInformer := c.getCachedInformer(ctx)
+
 	expectations := controller.NewControllerExpectations()
+	podHandlerBuilder := c.newResourceEventHandlerBuilderForPod(expectations)
+	ZkHandlerBuilder := c.newResourceEventHandlerBuilderForZookeeper(expectations)
+	// We must add the Pod handler before add ZookeeperCluster handler to avoid the influence the "expectations"
+	cachedInformer.AddHandler(&corev1.Pod{}, podHandlerBuilder, 1)
+	cachedInformer.AddHandler(&apis.ZookeeperCluster{}, ZkHandlerBuilder, 5)
 
-	podInformer := c.newZKPodInformer(expectations)
-	go podInformer.Run(ctx.Done())
-	if !cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
-		klog.Errorf("Failed to sync pods for zookeeper clusters!")
-		return
-	}
-
-	resourceSyncer := c.newResourceSyncerForZookeeper(expectations, ctx)
-	resourceSyncer.Run(5, ctx.Done())
+	<-ctx.Done()
 }
 
-func (c *Controller) newZKPodInformer(
-	expectations controller.ControllerExpectationsInterface) cache.Controller {
-	source := cache.NewFilteredListWatchFromClient(
-		c.client.KubernetesInterface().CoreV1().RESTClient(),
-		string(v1.ResourcePods),
-		metav1.NamespaceAll,
-		func(options *metav1.ListOptions) {
-			options.LabelSelector = labels.SelectorFromSet(map[string]string{"app": "zookeeper"}).String()
-		},
-	)
-	podHandler := ZkPodEventHandler{
-		expectations: expectations,
-		cli:          c.client.KubernetesInterface().CoreV1(),
-	}
-
-	_, podInformer := cache.NewInformer(source, &v1.Pod{}, resyncTime, &podHandler)
-
-	return podInformer
-}
-
-func (c *Controller) newResourceSyncerForZookeeper(expections controller.ControllerExpectationsInterface,
-	ctx context.Context) informer.ResourceSyncer {
+func (c *Controller) getCachedInformer(ctx context.Context) informer.CachedInformer {
 	scheme := runtime.NewScheme()
 	err := clientgoscheme.AddToScheme(scheme)
 	if err != nil {
@@ -93,31 +69,50 @@ func (c *Controller) newResourceSyncerForZookeeper(expections controller.Control
 		panic(err)
 	}
 
-	factory, err := informer.NewResourceSyncerFactory(c.client.GetConfig(), scheme, resyncTime)
+	cachedInformer, err := informer.NewCachedInformer(ctx, c.client.GetConfig(), scheme, resyncTime)
 	if err != nil {
 		panic(err)
 	}
-	go factory.Start(ctx.Done())
 
-	resourceSyncer := factory.ResourceSyncer(&v1alpha1.ZookeeperCluster{},
-		func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs {
-			zkSyncer := zookeeperSyncer{
-				adder:      adder,
-				client:     c.client,
-				expections: expections,
-			}
+	return cachedInformer
+}
 
-			return cache.ResourceEventHandlerFuncs{
-				AddFunc: zkSyncer.sync,
-				UpdateFunc: func(oldObj, newObj interface{}) {
-					zkSyncer.sync(newObj)
-				},
-				DeleteFunc: func(obj interface{}) {
-					cr := obj.(*v1alpha1.ZookeeperCluster)
-					expections.DeleteExpectations(cr.GetFullName())
-				},
-			}
-		})
+func (c *Controller) newResourceEventHandlerBuilderForPod(
+	expectations controller.ControllerExpectationsInterface) informer.ResourceEventHandlerBuilder {
 
-	return resourceSyncer
+	podHandler := ZkPodEventHandler{
+		expectations: expectations,
+		cli:          c.client.KubernetesInterface().CoreV1(),
+	}
+
+	return func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs {
+		return cache.ResourceEventHandlerFuncs{
+			AddFunc:    podHandler.OnAdd,
+			UpdateFunc: podHandler.OnUpdate,
+			DeleteFunc: podHandler.OnDelete,
+		}
+	}
+}
+
+func (c *Controller) newResourceEventHandlerBuilderForZookeeper(
+	expections controller.ControllerExpectationsInterface) informer.ResourceEventHandlerBuilder {
+
+	return func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs {
+		zkSyncer := zookeeperSyncer{
+			adder:      adder,
+			client:     c.client,
+			expections: expections,
+		}
+
+		return cache.ResourceEventHandlerFuncs{
+			AddFunc: zkSyncer.sync,
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				zkSyncer.sync(newObj)
+			},
+			DeleteFunc: func(obj interface{}) {
+				cr := obj.(*v1alpha1.ZookeeperCluster)
+				expections.DeleteExpectations(cr.GetFullName())
+			},
+		}
+	}
 }

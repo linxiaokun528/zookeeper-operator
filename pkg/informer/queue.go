@@ -17,7 +17,9 @@ import (
 type Consumer func(obj interface{})
 
 type ConsumingQueue struct {
-	workqueue.RateLimitingInterface
+	// Don't just use "workqueue.RateLimitingInterface" here, because we don't want to inherit the all functions of
+	// workqueue.RateLimitingInterface: We don't want users to invoke "workqueue.RateLimitingInterface.ShutDown".
+	queue    workqueue.RateLimitingInterface
 	consumer Consumer
 
 	wait sync.WaitGroup
@@ -25,9 +27,9 @@ type ConsumingQueue struct {
 
 func NewConsumingQueue(queue workqueue.RateLimitingInterface, consumer Consumer) *ConsumingQueue {
 	return &ConsumingQueue{
-		RateLimitingInterface: queue,
-		consumer:              consumer,
-		wait:                  sync.WaitGroup{},
+		queue:    queue,
+		consumer: consumer,
+		wait:     sync.WaitGroup{},
 	}
 }
 
@@ -37,6 +39,7 @@ func (c *ConsumingQueue) Start(consumerNum int, stopCh <-chan struct{}) {
 		go wait.Until(c.worker, time.Second, stopCh)
 	}
 	<-stopCh
+	c.shutDown()
 }
 
 func (c *ConsumingQueue) worker() {
@@ -52,14 +55,51 @@ func (c *ConsumingQueue) processNextWorkItem() bool {
 		return false
 	}
 	defer c.Done(obj)
-	c.consumer(obj.(string))
+	c.consumer(obj)
 
 	return true
 }
 
-func (c *ConsumingQueue) ShutDown() {
-	c.RateLimitingInterface.ShutDown()
+// Don't invoke this function directly. Use the stopCh parameter in function "Start" to control when to shutDown.
+func (c *ConsumingQueue) shutDown() {
+	c.queue.ShutDown()
 	c.wait.Wait()
+}
+
+func (c *ConsumingQueue) Len() int {
+	return c.queue.Len()
+}
+
+func (c *ConsumingQueue) ShuttingDown() bool {
+	return c.queue.ShuttingDown()
+}
+
+func (c *ConsumingQueue) Add(item interface{}) {
+	c.queue.Add(item)
+}
+
+func (c *ConsumingQueue) AddAfter(item interface{}, duration time.Duration) {
+	c.queue.AddAfter(item, duration)
+}
+
+func (c *ConsumingQueue) AddRateLimited(item interface{}) {
+	c.queue.AddRateLimited(item)
+}
+
+func (c *ConsumingQueue) Forget(item interface{}) {
+	c.queue.Forget(item)
+}
+
+func (c *ConsumingQueue) NumRequeues(item interface{}) int {
+	return c.queue.NumRequeues(item)
+}
+
+func (c *ConsumingQueue) Get() (item interface{}, shutdown bool) {
+	return c.queue.Get()
+}
+
+func (c *ConsumingQueue) Done(item interface{}) {
+	c.queue.Done(item)
 }
 
 func objToKey(obj interface{}) string {
@@ -80,10 +120,6 @@ type eventConsumingQueue struct {
 
 func (e *eventConsumingQueue) Len() int {
 	return e.queue.Len()
-}
-
-func (e *eventConsumingQueue) ShutDown() {
-	e.queue.ShutDown()
 }
 
 func (e *eventConsumingQueue) ShuttingDown() bool {
@@ -109,31 +145,20 @@ func (e *eventConsumingQueue) AddRateLimited(resource_event *event) {
 }
 
 func (e *eventConsumingQueue) Forget(resource_event *event) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
 	e.queue.Forget(e.encode(resource_event, false))
 }
 
 func (e *eventConsumingQueue) NumRequeues(resource_event *event) int {
+	e.lock.Lock()
+	defer e.lock.Unlock()
 	return e.queue.NumRequeues(e.encode(resource_event, false))
 }
 
-func (e *eventConsumingQueue) Get() (resource_event *event, shutdown bool) {
+func (e *eventConsumingQueue) Done(resource_event *event) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-
-	for resource_event == nil {
-		item, shutdown := e.queue.Get()
-
-		if item == nil {
-			return nil, shutdown
-		}
-
-		resource_event = e.decode(item.(string))
-	}
-
-	return resource_event, shutdown
-}
-
-func (e *eventConsumingQueue) Done(resource_event *event) {
 	e.queue.Done(e.encode(resource_event, false))
 }
 
@@ -189,7 +214,7 @@ func (e *eventConsumingQueue) decode(event_key string) *event {
 			// There is a chance that the object is deleted when doing the decode, so the error might be
 			// something like "zookeepercluster.zookeeper.database.apache.com \"example-zookeeper-cluster\" not found".
 			// We will receive a deletion event later in this situation.
-			if !apierrors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				delete(e.oldObjs, obj_key)
 				return nil
 			} else {
@@ -213,6 +238,18 @@ func (e *eventConsumingQueue) decode(event_key string) *event {
 	}
 }
 
+func (e *eventConsumingQueue) consume(obj interface{}, consumer Consumer) {
+	// To avoid panic like concurrent map read and map write
+	e.lock.Lock()
+	// TODO: what if a panic happend in e.decode?
+	event := e.decode(obj.(string))
+	e.lock.Unlock()
+
+	if event != nil {
+		consumer(event)
+	}
+}
+
 func newEventConsumingQueue(lister cache.GenericLister, consumer Consumer) *eventConsumingQueue {
 	eventQueue := eventConsumingQueue{
 		lister:      lister,
@@ -223,7 +260,7 @@ func newEventConsumingQueue(lister cache.GenericLister, consumer Consumer) *even
 	consumingQueue := NewConsumingQueue(
 		workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 		func(obj interface{}) {
-			consumer(eventQueue.decode(obj.(string)))
+			eventQueue.consume(obj, consumer)
 		})
 	eventQueue.queue = consumingQueue
 
@@ -256,7 +293,7 @@ type ResourceRateLimitingAdder interface {
 	// We don't want users to invoke the following APIs
 	// Get() (item runtime.Object, shutdown bool)
 	// Done(item runtime.Object)
-	// ShutDown()
+	// shutDown()
 	// ShuttingDown() bool
 }
 

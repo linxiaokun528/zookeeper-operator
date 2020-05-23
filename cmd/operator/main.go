@@ -142,8 +142,6 @@ func main() {
 			},
 		})
 	}
-
-	panic("unreachable")
 }
 
 func createRecorder(kubecli kubernetes.Interface) record.EventRecorder {

@@ -127,7 +127,13 @@ func (c *Cluster) sync() error {
 		return nil
 	}
 
-	if members.Ready.Size() == 0 && members.Running.Size() < c.zkCR.Spec.Size {
+	// Don't use "if (members.Ready.Size() == 0 || members.Running.Size() < c.zkCR.Spec.Size)" here. Consider the situation:
+	// We are expand zookeeper cluster from 2 instances to 3 instances, the third instances(C) has been created but not
+	// reconfigered into zookeeper ensemble yet. And this time, one of the original instances(B) is deleted. Then we
+	// will never recover the cluster, because we can't successfully reconfig the cluster.
+	// (zookeeper cluster has lost its quorum.)
+	// We should recover the deleted node first(c.beginScaleup) instead of reconfig zookeeper(c.finishScaleUp) first.
+	if (members.Running.Size() + members.Ready.Size()) < c.zkCR.Spec.Size {
 		c.zkCR.Status.AppendScalingUpCondition(members.Running.Size(), c.zkCR.Spec.Size)
 
 		return c.beginScaleUp()

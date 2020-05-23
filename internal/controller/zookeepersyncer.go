@@ -23,15 +23,16 @@ type zookeeperSyncer struct {
 func (z *zookeeperSyncer) sync(obj interface{}) {
 	cr := obj.(*api.ZookeeperCluster)
 	zkCluster := zkcluster.New(z.client.GetCRClient(cr.Namespace), cr, z.expections)
+	var err error = nil
 	defer func() {
-		if !zkCluster.IsFinished() {
+		if err == nil && !zkCluster.IsFinished() {
 			z.adder.AddAfter(cr, retryWaitTime)
 		}
 	}()
 
 	start := time.Now()
 
-	err := zkCluster.SyncAndUpdateStatus()
+	err = zkCluster.SyncAndUpdateStatus()
 
 	zkcluster.ReconcileHistogram.WithLabelValues(cr.Name).Observe(
 		time.Since(start).Seconds())

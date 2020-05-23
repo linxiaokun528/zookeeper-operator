@@ -4,10 +4,12 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	cliv1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/controller"
+
+	apis "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
 type ZkPodEventHandler struct {
@@ -24,8 +26,12 @@ func (p *ZkPodEventHandler) OnAdd(obj interface{}) {
 		return
 	}
 
+	if !p.isPodFromZkController(pod) {
+		return
+	}
+
 	key := getExpectionKey(pod)
-	klog.V(4).Infoln("Pod addition observed: %s/%s", pod.Namespace, pod.Name)
+	klog.Infoln("Pod addition observed: %s/%s", pod.Namespace, pod.Name)
 	// We won't have a record in p.expectations in the first sync. And we don't need to do anything in the first sync.
 	_, ok, err := p.expectations.GetExpectations(key)
 	if err != nil {
@@ -48,24 +54,35 @@ func (p *ZkPodEventHandler) OnUpdate(oldObj, newObj interface{}) {
 
 }
 
-// TODO: if the owner of the pod is deleted, then don't do anything
+func (p *ZkPodEventHandler) isPodFromZkController(pod *corev1.Pod) bool {
+	for _, ref := range pod.GetOwnerReferences() {
+		refGV, err := schema.ParseGroupVersion(ref.APIVersion)
+		if err != nil {
+			panic(err)
+		}
+
+		if ref.Kind == apis.Kind && refGV.Group == apis.GroupName && refGV.Version == apis.Version {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (p *ZkPodEventHandler) OnDelete(obj interface{}) {
-	tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-	var pod *corev1.Pod
-	if ok {
-		pod = tombstone.Obj.(*corev1.Pod)
-	} else {
-		pod = obj.(*corev1.Pod)
+	pod := obj.(*corev1.Pod)
+	if !p.isPodFromZkController(pod) {
+		return
 	}
 
 	key := getExpectionKey(pod)
 
-	klog.V(4).Infoln("Pod deletion observed: %s/%s", pod.Namespace, pod.Name)
+	klog.Infof("Pod deletion observed: %s/%s", pod.Namespace, pod.Name)
 	// We won't have a record in p.expectations in the first sync or the zookeeper cluster is deleted.
 	// So we don't need to do anything in the first sync.
 	_, ok, err := p.expectations.GetExpectations(key)
 	if err != nil {
-		fmt.Errorf("%s", err)
+		klog.Errorf("%s", err)
 		return
 	}
 	if !ok {

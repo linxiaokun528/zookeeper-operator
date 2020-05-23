@@ -14,7 +14,9 @@ func (c *Cluster) beginScaleUp() (err error) {
 	klog.Infof("Scaling up zookeeper cluster %v(current cluster size: %d, desired cluster size: %d)...",
 		c.zkCR.GetFullName(), c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
 
-	diff := c.zkCR.Spec.Size - c.zkCR.Status.Members.Running.Size()
+	existing := c.zkCR.Status.Members.Running
+	existing.Update(&c.zkCR.Status.Members.Ready)
+	diff := c.zkCR.Spec.Size - existing.Size()
 	newMembers := c.zkCR.Status.Members.AddMembers(diff)
 	defer func() {
 		if err == nil {

@@ -363,6 +363,9 @@ func (z *ZKCluster) nextMemberID() int {
 	for _, m := range z.Running.members {
 		ids[m.ID()] = struct{}{}
 	}
+	for _, m := range z.Ready.members {
+		ids[m.ID()] = struct{}{}
+	}
 	for _, m := range z.Unready.members {
 		ids[m.ID()] = struct{}{}
 	}
