@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
-	"github.com/samuel/go-zookeeper/zk"
+	"github.com/go-zookeeper/zk"
 )
 
 func GetClusterConfig(hosts []string) ([]string, error) {
@@ -54,7 +54,7 @@ func ReconfigureCluster(hosts []string, desiredConfig []string) error {
 		return err
 	}
 	defer conn.Close()
-	klog.V(4).Infof("Pushing reconfig %s to zookeeper hosts: %s", desiredConfig, hosts)
+	klog.V(2).Infof("Pushing reconfig %s to zookeeper hosts: %s", desiredConfig, hosts)
 	_, err = conn.Reconfig(desiredConfig, -1)
 
 	if err != nil {

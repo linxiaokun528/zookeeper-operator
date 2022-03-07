@@ -3,7 +3,7 @@ package zkcluster
 import (
 	"sync"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/errors"

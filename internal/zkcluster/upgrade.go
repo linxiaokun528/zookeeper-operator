@@ -18,7 +18,7 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	k8sutil "zookeeper-operator/internal/util/k8s"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
@@ -55,7 +55,7 @@ func (c *Cluster) upgradeOneMember() error {
 }
 
 func (c *Cluster) upgradeMember(memberName string) error {
-	pod, err := c.client.Pod().Get(memberName, metav1.GetOptions{})
+	pod, err := c.client.Pod().Get(c.ctx, memberName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("fail to get pod (%s): %v", memberName, err)
 	}
@@ -64,7 +64,7 @@ func (c *Cluster) upgradeMember(memberName string) error {
 	klog.Infof("Upgrading the zookeeper member %v from %s to %s", memberName, k8sutil.GetZookeeperVersion(pod), c.zkCR.Spec.Version)
 	k8sutil.SetZookeeperVersion(pod, c.zkCR.Spec.Version)
 
-	_, err = c.client.Pod().Update(pod)
+	_, err = c.client.Pod().Update(c.ctx, pod, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("fail to update the zookeeper member (%s): %v", memberName, err)
 	}

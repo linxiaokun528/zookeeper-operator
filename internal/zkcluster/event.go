@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 
@@ -27,7 +27,7 @@ import (
 )
 
 func (c *Cluster) createEvent(event *v1.Event) error {
-	_, err := c.client.Event().Create(event)
+	_, err := c.client.Event().Create(c.ctx, event, metav1.CreateOptions{})
 	if err != nil {
 		klog.Errorf("Failed to create event for \"%s\": %v", event.Message, err)
 	}

@@ -1,13 +1,16 @@
 package controller
 
 import (
+	"context"
+
 	"gopkg.in/fatih/set.v0"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	cliv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	apis "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/k8sutil"
@@ -17,6 +20,7 @@ type ZkPodEventHandler struct {
 	podsToDelete set.Interface
 	zkLister     cache.GenericLister
 	cli          cliv1.PodsGetter
+	ctx          context.Context
 }
 
 func (p *ZkPodEventHandler) OnAdd(obj interface{}) {
@@ -65,7 +69,7 @@ func (p *ZkPodEventHandler) OnDelete(obj interface{}) {
 		// Don't need to worry that if the corresponding zookeeper cluster is deleted.
 		// Even if we create the pod after the zookeeper cluster is deleted, the pod will be terminated automatically
 		// anyway.
-		_, err := p.cli.Pods(pod.Namespace).Create(pod)
+		_, err := p.cli.Pods(pod.Namespace).Create(p.ctx, pod, metav1.CreateOptions{})
 		if err != nil {
 			klog.Error(err)
 		} else {

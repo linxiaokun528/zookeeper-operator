@@ -9,7 +9,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 func (c *Cluster) create() (err error) {
@@ -60,7 +60,7 @@ func (c *Cluster) setupServices() error {
 func (c *Cluster) createService(service *v1.Service) error {
 	service.OwnerReferences = append(service.OwnerReferences, c.zkCR.AsOwner())
 
-	_, err := c.client.Service().Create(service)
+	_, err := c.client.Service().Create(c.ctx, service, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}

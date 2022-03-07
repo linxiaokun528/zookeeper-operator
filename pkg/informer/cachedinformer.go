@@ -13,16 +13,19 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 	sigcache "sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"zookeeper-operator/pkg/util"
 )
 
 type ResourceEventHandlerBuilder func(lister cache.GenericLister, adder ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs
 
 type CachedInformer interface {
-	AddHandler(obj runtime.Object, resourceEventHandlerBuilder ResourceEventHandlerBuilder, workerNum int)
-	GetLister(obj runtime.Object) cache.GenericLister
+	AddHandler(obj client.Object, resourceEventHandlerBuilder ResourceEventHandlerBuilder, workerNum int)
+	GetLister(obj client.Object) cache.GenericLister
 }
 
 type cachedInformer struct {
@@ -32,7 +35,7 @@ type cachedInformer struct {
 	ctx    context.Context
 }
 
-func (r *cachedInformer) getGVR(obj runtime.Object) schema.GroupVersionResource {
+func (r *cachedInformer) getGVR(obj client.Object) schema.GroupVersionResource {
 	gvk, err := apiutil.GVKForObject(obj, r.scheme)
 	if err != nil {
 		panic(err)
@@ -45,8 +48,8 @@ func (r *cachedInformer) getGVR(obj runtime.Object) schema.GroupVersionResource 
 	}
 }
 
-func (r *cachedInformer) getInformer(obj runtime.Object) cache.SharedIndexInformer {
-	informer, err := r.cache.GetInformer(obj)
+func (r *cachedInformer) getInformer(obj client.Object) cache.SharedIndexInformer {
+	informer, err := r.cache.GetInformer(r.ctx, obj)
 	if err != nil {
 		panic(err)
 	}
@@ -61,18 +64,18 @@ func (r *cachedInformer) getInformer(obj runtime.Object) cache.SharedIndexInform
 	return informer.(cache.SharedIndexInformer)
 }
 
-func (r *cachedInformer) GetLister(obj runtime.Object) cache.GenericLister {
+func (r *cachedInformer) GetLister(obj client.Object) cache.GenericLister {
 	informer := r.getInformer(obj)
-	return cache.NewGenericLister(informer.(cache.SharedIndexInformer).GetIndexer(), r.getGVR(obj).GroupResource())
+	return cache.NewGenericLister(informer.GetIndexer(), r.getGVR(obj).GroupResource())
 }
 
-func (r *cachedInformer) AddHandler(obj runtime.Object, resourceEventHandlerBuilder ResourceEventHandlerBuilder, workerNum int) {
+func (r *cachedInformer) AddHandler(obj client.Object, resourceEventHandlerBuilder ResourceEventHandlerBuilder, workerNum int) {
 	informer := r.getInformer(obj)
 	lister := r.GetLister(obj)
 	gvr := r.getGVR(obj)
 	handler := newCachedHandler(gvr, lister, resourceEventHandlerBuilder)
 	informer.AddEventHandler(handler)
-	go handler.Start(workerNum, r.ctx.Done())
+	go handler.Start(workerNum, r.ctx)
 }
 
 func NewCachedInformer(ctx context.Context, config *rest.Config, scheme *runtime.Scheme, resync time.Duration) (CachedInformer, error) {
@@ -85,36 +88,61 @@ func NewCachedInformer(ctx context.Context, config *rest.Config, scheme *runtime
 	if err != nil {
 		return nil, err
 	}
-	go cache.Start(ctx.Done())
+	go cache.Start(ctx)
 
 	return &cachedInformer{config: config, cache: cache, scheme: scheme, ctx: ctx}, nil
 }
 
 type cachedResourceEventHandler struct {
-	eventQueue *eventConsumingQueue
+	eventQueue *rateLimitingTypeForEventQueue
 	handler    cache.ResourceEventHandlerFuncs
 	gvr        schema.GroupVersionResource
 }
 
 func newCachedHandler(gvr schema.GroupVersionResource, lister cache.GenericLister, resourceEventHandlerBuilder ResourceEventHandlerBuilder) *cachedResourceEventHandler {
-	result := cachedResourceEventHandler{gvr: gvr}
-
-	eventQueue := newEventConsumingQueue(lister, result.consume)
+	eventQueue := newRateLimitingQueue(lister, workqueue.DefaultControllerRateLimiter())
 	adder := resourceRateLimitingAdder{
 		eventQueue: eventQueue,
 	}
 	handler := resourceEventHandlerBuilder(lister, &adder)
 
-	result.handler = handler
-	result.eventQueue = eventQueue
+	result := cachedResourceEventHandler{
+		eventQueue: eventQueue,
+		handler:    handler,
+		gvr:        gvr,
+	}
 
 	return &result
 }
 
-func (i *cachedResourceEventHandler) Start(workerNum int, stopCh <-chan struct{}) {
+func (i *cachedResourceEventHandler) Start(workerNum int, ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
-	i.eventQueue.Start(workerNum, stopCh)
+	go func() {
+		<-ctx.Done()
+		i.eventQueue.ShutDown()
+	}()
+
+	producer := func() interface{} {
+		klog.V(4).Infof("Try to get an event from %s queue...", i.formatedGVR())
+		event, quit := i.eventQueue.Get()
+		defer func() {
+			if r := recover(); r != nil {
+				// If errors happen in this function, the event won't be consumed. Need to mark it as done so that
+				// it won't block following events.
+				i.eventQueue.Done(event)
+				panic(r)
+			}
+		}()
+		klog.V(4).Infof("Got event %s from %s queue: %#v", event.getType(), i.formatedGVR(), event)
+		if quit {
+			return nil
+		}
+
+		return event
+	}
+	processor := util.NewParallelConsumingProcessor(producer, i.consume)
+	processor.Start(workerNum, ctx)
 }
 
 func (i *cachedResourceEventHandler) formatedGVR() string {
@@ -126,29 +154,21 @@ func (i *cachedResourceEventHandler) formatedGVR() string {
 }
 
 func (i *cachedResourceEventHandler) OnAdd(obj interface{}) {
-	klog.V(4).Infof("Receive a creation event of %s for %s", i.formatedGVR(), objToKey(obj))
+	klog.V(2).Infof("Receive a creation event of %s for %s", i.formatedGVR(), objToKey(obj))
 	if i.handler.AddFunc == nil {
 		return
 	}
 
-	i.eventQueue.Add(&event{
-		eventType: watch.Added,
-		newObj:    obj.(runtime.Object),
-	})
+	i.eventQueue.Add(newAdditionEvent(obj.(runtime.Object)))
 }
 
 func (i *cachedResourceEventHandler) OnUpdate(oldObj, newObj interface{}) {
-	klog.V(4).Infof("Receive a update event of %s for %s", i.formatedGVR(), objToKey(newObj))
+	klog.V(2).Infof("Receive a update event of %s for %s", i.formatedGVR(), objToKey(newObj))
 	if i.handler.UpdateFunc == nil {
 		return
 	}
 
-	i.eventQueue.Add(&event{
-		eventType: watch.Modified,
-		oldObj:    oldObj.(runtime.Object),
-		newObj:    newObj.(runtime.Object),
-	})
-
+	i.eventQueue.Add(newUpdateEvent(oldObj.(runtime.Object), newObj.(runtime.Object)))
 }
 
 func (i *cachedResourceEventHandler) OnDelete(obj interface{}) {
@@ -156,31 +176,32 @@ func (i *cachedResourceEventHandler) OnDelete(obj interface{}) {
 	if ok {
 		obj = tombstone.Obj
 	}
-	klog.V(4).Infof("Receive a deletion event of %s for %s", i.formatedGVR(), objToKey(obj))
+	klog.V(2).Infof("Receive a deletion event of %s for %s", i.formatedGVR(), objToKey(obj))
 
 	if i.handler.DeleteFunc == nil {
 		return
 	}
 
-	i.eventQueue.Add(&event{
-		eventType: watch.Deleted,
-		newObj:    obj.(runtime.Object),
-	})
-
+	i.eventQueue.Add(newDeletionEvent(obj.(runtime.Object)))
 }
 
 func (i *cachedResourceEventHandler) consume(item interface{}) {
-	event := item.(*event)
+	if item == nil {
+		return
+	}
 
-	if event.eventType == watch.Deleted {
-		i.handler.OnDelete(event.newObj)
+	event := item.(*event)
+	defer i.eventQueue.Done(event)
+
+	if event.getType() == watch.Deleted {
+		i.handler.OnDelete(event.oldObj)
 	} else {
-		// Actually, I don't think this will happen.
-		if event.newObj.(metav1.Object).GetDeletionTimestamp() != nil {
+		// Actually, I don't think 'event.newObj.(metav1.Object).GetDeletionTimestamp() != nil' will happen.
+		if event.newObj == nil || event.newObj.(metav1.Object).GetDeletionTimestamp() != nil {
 			return
 		}
 
-		if event.eventType == watch.Modified {
+		if event.getType() == watch.Modified {
 			i.handler.OnUpdate(event.oldObj, event.newObj)
 		} else {
 			i.handler.OnAdd(event.newObj)

@@ -1,7 +1,7 @@
 package zkcluster
 
 import (
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	"zookeeper-operator/internal/util/zookeeper"
 )

@@ -19,6 +19,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
 	time "time"
 	zookeeperv1alpha1 "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	versioned "zookeeper-operator/pkg/client/clientset/versioned"
@@ -61,13 +62,13 @@ func NewFilteredZookeeperClusterInformer(client versioned.Interface, namespace s
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ZookeeperV1alpha1().ZookeeperClusters(namespace).List(options)
+				return client.ZookeeperV1alpha1().ZookeeperClusters(namespace).List(context.TODO(), options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ZookeeperV1alpha1().ZookeeperClusters(namespace).Watch(options)
+				return client.ZookeeperV1alpha1().ZookeeperClusters(namespace).Watch(context.TODO(), options)
 			},
 		},
 		&zookeeperv1alpha1.ZookeeperCluster{},

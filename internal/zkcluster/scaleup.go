@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"k8s.io/klog"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/errors"
@@ -71,7 +72,7 @@ func (c *Cluster) addOneMember(m *api.Member, lastCommittedMembers *api.Members)
 	allClusterMembers := lastCommittedMembers.Copy()
 	allClusterMembers.Add(m)
 	pod := newZookeeperPod(m, allClusterMembers, c.zkCR)
-	_, err := c.client.Pod().Create(pod)
+	_, err := c.client.Pod().Create(c.ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("Failed to create member's pod (%s): %v", m.Name(), err)
 	}

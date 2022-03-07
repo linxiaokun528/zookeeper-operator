@@ -15,13 +15,14 @@
 package k8sutil
 
 import (
+	"context"
 	"fmt"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
+	apiextensionsclientv1 "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	clientsetretry "k8s.io/client-go/util/retry"
 )
@@ -34,16 +35,18 @@ type CRDClient interface {
 
 type crdClient struct {
 	client apiextensionsclientv1.CustomResourceDefinitionInterface
+	ctx    context.Context
 }
 
-func NewCRDClientOrDie(config *rest.Config) CRDClient {
+func NewCRDClientOrDie(ctx context.Context, config *rest.Config) CRDClient {
 	return &crdClient{
-		client: apiextensionsclient.NewForConfigOrDie(config).ApiextensionsV1beta1().CustomResourceDefinitions(),
+		client: apiextensionsclient.NewForConfigOrDie(config).ApiextensionsV1().CustomResourceDefinitions(),
+		ctx:    ctx,
 	}
 }
 
 func (c *crdClient) Create(crd *apiextensionsv1.CustomResourceDefinition) error {
-	_, err := c.client.Create(crd)
+	_, err := c.client.Create(c.ctx, crd, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
@@ -56,7 +59,7 @@ func (c *crdClient) Wait(crd *apiextensionsv1.CustomResourceDefinition) error {
 			return true
 		},
 		func() error {
-			crd, err := c.client.Get(crd.Name, metav1.GetOptions{})
+			crd, err := c.client.Get(c.ctx, crd.Name, metav1.GetOptions{})
 			if err != nil {
 				return err
 			}
@@ -88,33 +91,4 @@ func (c *crdClient) CreateAndWait(crd *apiextensionsv1.CustomResourceDefinition)
 	}
 
 	return c.Wait(crd)
-}
-
-func NewCRD(scope apiextensionsv1.ResourceScope,
-	gvk schema.GroupVersionKind, plural, shortName string) *apiextensionsv1.CustomResourceDefinition {
-	customResourceDefinition := &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: plural + "." + gvk.Group,
-		},
-		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: gvk.Group,
-			Scope: scope,
-			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
-				{
-					Name:    gvk.Version,
-					Served:  true,
-					Storage: true,
-				},
-			},
-			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Plural: plural,
-				Kind:   gvk.Kind,
-			},
-		},
-	}
-	if len(shortName) != 0 {
-		customResourceDefinition.Spec.Names.ShortNames = []string{shortName}
-	}
-
-	return customResourceDefinition
 }

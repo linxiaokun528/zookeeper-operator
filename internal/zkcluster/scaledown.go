@@ -2,9 +2,11 @@ package zkcluster
 
 import (
 	"fmt"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/klog"
 	"sync"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/errors"
 )
@@ -54,7 +56,7 @@ func (c *Cluster) scaleDown() (err error) {
 func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 	podName := fmt.Sprintf("%s/%s", c.zkCR.Namespace, m.Name())
 	c.podsToDelete.Add(podName)
-	if err := c.client.Pod().Delete(m.Name(), nil); err != nil {
+	if err := c.client.Pod().Delete(c.ctx, m.Name(), metav1.DeleteOptions{}); err != nil {
 		c.podsToDelete.Remove(podName)
 		if !apierrors.IsNotFound(err) {
 			return err

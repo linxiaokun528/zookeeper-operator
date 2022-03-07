@@ -5,7 +5,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	k8sutil2 "zookeeper-operator/pkg/k8sutil"
@@ -54,10 +54,10 @@ func (c *Cluster) checkOwnerReference(pod *v1.Pod) bool {
 }
 
 func (c *Cluster) syncCurrentMembers() (err error) {
-	klog.V(4).Infof("Syncing zookeeper members for %v...", c.zkCR.GetFullName())
+	klog.V(1).Infof("Syncing zookeeper members for %v...", c.zkCR.GetFullName())
 	defer func() {
 		if err == nil {
-			klog.V(4).Infof("Zookeeper members for %v synced successfully", c.zkCR.GetFullName())
+			klog.V(1).Infof("Zookeeper members for %v synced successfully", c.zkCR.GetFullName())
 		}
 	}()
 

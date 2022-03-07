@@ -2,23 +2,26 @@
 v0.2.0
 
 ## Future plan
-### v0.3.0
-Add settings for PV and PVC
+### v0.2.1
+- Add validation check, whether using `OpenAPI v3 schema` or `Admission Webhook`
+- Use group v1 instead of v1beta to create CRD
 
-### v0.4.0
+### v0.3.0
 Use `controller-runtime` to refactor this project
 
-### v0.4.1
+### v0.3.1
 Use `kubebuilder` and `kustomizer` to manage this project
 
 - Put CRD initialization outside of the operator
-- Add validation check, whether using `OpenAPI v3 schema` or `Admission Webhook`
 - Show more information/status in `kubectl get zookeepercluster`
 
-### v0.4.2 (optional)
+### v0.3.2 (optional)
 Something a pod is shown as running, but it's actually not working. (For example, when we watch a local IP)
 
 So we need to use another readness probe. The current one we are using something does not work.
+
+### v0.4.0
+Add settings for PV and PVC
 
 
 ### v0.5.0

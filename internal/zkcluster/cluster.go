@@ -15,6 +15,7 @@
 package zkcluster
 
 import (
+	"context"
 	"reflect"
 	"sync"
 
@@ -23,7 +24,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetretry "k8s.io/client-go/util/retry"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	client2 "zookeeper-operator/internal/client"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
@@ -36,9 +37,12 @@ type Cluster struct {
 	locker       sync.Locker
 	podLister    cache.GenericLister
 	podsToDelete set.Interface
+	ctx          context.Context
 }
 
-func New(client client2.CRClient, zkCR *api.ZookeeperCluster,
+func New(
+	ctx context.Context,
+	client client2.CRClient, zkCR *api.ZookeeperCluster,
 	podLister cache.GenericLister, podsToDelete set.Interface) *Cluster {
 	c := &Cluster{
 		client:       client,
@@ -46,6 +50,7 @@ func New(client client2.CRClient, zkCR *api.ZookeeperCluster,
 		locker:       &sync.Mutex{},
 		podLister:    podLister,
 		podsToDelete: podsToDelete,
+		ctx:          ctx,
 	}
 
 	return c
@@ -58,7 +63,8 @@ func (c *Cluster) SyncAndUpdateStatus() (err error) {
 			update_err := c.updateStatus()
 			err = errors.NewCompoundedError(err, update_err)
 		} else {
-			klog.Infof("Status not changed. Don't need to update the status of zookeeper cluster %s", c.zkCR.GetFullName())
+			klog.Infof("Status not changed. Don't need to update the status of zookeeper cluster %s",
+				c.zkCR.GetFullName())
 		}
 	}()
 	return c.sync()
@@ -66,7 +72,7 @@ func (c *Cluster) SyncAndUpdateStatus() (err error) {
 
 func (c *Cluster) updateStatus() error {
 	return clientsetretry.RetryOnConflict(clientsetretry.DefaultRetry, func() error {
-		newZkCr, err := c.client.ZookeeperCluster().Get(c.zkCR.Name, metav1.GetOptions{})
+		newZkCr, err := c.client.ZookeeperCluster().Get(c.ctx, c.zkCR.Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -74,7 +80,7 @@ func (c *Cluster) updateStatus() error {
 		newZkCr.Status = c.zkCR.Status
 		// We are supposed to use UpdateStatus here. But we don't have a status resource yet.
 		// TODO: add a default value to the status in CRD
-		newZkCr, err = c.client.ZookeeperCluster().Update(newZkCr)
+		newZkCr, err = c.client.ZookeeperCluster().Update(c.ctx, newZkCr, metav1.UpdateOptions{})
 		if err == nil {
 			klog.Infof("Status of zookeeper cluster %s updated successfully", c.zkCR.GetFullName())
 		} else {
@@ -87,8 +93,6 @@ func (c *Cluster) updateStatus() error {
 func (c *Cluster) sync() error {
 	klog.Infof("Start syncing zookeeper cluster %v", c.zkCR.GetFullName())
 	defer klog.Infof("Finish syncing zookeeper cluster %v", c.zkCR.GetFullName())
-
-	c.zkCR.SetDefaults()
 
 	if c.zkCR.Status.StartTime == nil {
 		// TODO: consider the situation that the services are deleted

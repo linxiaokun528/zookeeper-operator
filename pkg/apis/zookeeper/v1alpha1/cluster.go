@@ -17,13 +17,12 @@ package v1alpha1
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
-	defaultRepository       = "zookeeper-instance"
+	DefaultRepository       = "zookeeper-instance"
 	DefaultZookeeperVersion = "3.5.7"
 )
 
@@ -107,18 +106,4 @@ type ClusterSpec struct {
 	//
 	// If version is not set, default is "3.5.7".
 	Version string `json:"version,omitempty"`
-}
-
-// TODO: move this to OpenAPI v3 schema
-func (e *ZookeeperCluster) SetDefaults() {
-	c := &e.Spec
-	if len(c.Repository) == 0 {
-		c.Repository = defaultRepository
-	}
-
-	if len(c.Version) == 0 {
-		c.Version = DefaultZookeeperVersion
-	}
-
-	c.Version = strings.TrimLeft(c.Version, "v")
 }

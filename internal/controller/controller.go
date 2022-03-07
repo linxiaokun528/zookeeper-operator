@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"gopkg.in/fatih/set.v0"
+	"k8s.io/klog/v2"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,6 +37,7 @@ const resyncTime = 2 * time.Minute
 
 type Controller struct {
 	client client2.Client
+	ctx    context.Context
 }
 
 func New(client client2.Client) *Controller {
@@ -46,22 +48,17 @@ func New(client client2.Client) *Controller {
 
 func (c *Controller) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
-
-	cachedInformer := c.getCachedInformer(ctx)
-
-	zkLister := cachedInformer.GetLister(&apis.ZookeeperCluster{})
-	podLister := cachedInformer.GetLister(&corev1.Pod{})
-
+	c.ctx = ctx
+	cachedInformer := c.newCachedInformer()
 	podsToDelete := set.New(set.ThreadSafe)
-	podHandlerBuilder := c.newResourceEventHandlerBuilderForPod(zkLister, podsToDelete)
-	ZkHandlerBuilder := c.newResourceEventHandlerBuilderForZookeeper(podLister, podsToDelete)
-	cachedInformer.AddHandler(&corev1.Pod{}, podHandlerBuilder, 1)
-	cachedInformer.AddHandler(&apis.ZookeeperCluster{}, ZkHandlerBuilder, 5)
+
+	c.addHandlerForPods(cachedInformer, podsToDelete)
+	c.addHandlerForZookeeper(cachedInformer, podsToDelete)
 
 	<-ctx.Done()
 }
 
-func (c *Controller) getCachedInformer(ctx context.Context) informer.CachedInformer {
+func (c *Controller) newCachedInformer() informer.CachedInformer {
 	scheme := runtime.NewScheme()
 	err := clientgoscheme.AddToScheme(scheme)
 	if err != nil {
@@ -72,7 +69,7 @@ func (c *Controller) getCachedInformer(ctx context.Context) informer.CachedInfor
 		panic(err)
 	}
 
-	cachedInformer, err := informer.NewCachedInformer(ctx, c.client.GetConfig(), scheme, resyncTime)
+	cachedInformer, err := informer.NewCachedInformer(c.ctx, c.client.GetConfig(), scheme, resyncTime)
 	if err != nil {
 		panic(err)
 	}
@@ -80,38 +77,51 @@ func (c *Controller) getCachedInformer(ctx context.Context) informer.CachedInfor
 	return cachedInformer
 }
 
-func (c *Controller) newResourceEventHandlerBuilderForPod(
-	zkLister cache.GenericLister, podsToDelete set.Interface) informer.ResourceEventHandlerBuilder {
+func (c *Controller) addHandlerForPods(
+	cachedInformer informer.CachedInformer,
+	podsToDelete set.Interface) {
 	podHandler := ZkPodEventHandler{
-		zkLister:     zkLister,
+		zkLister:     cachedInformer.GetLister(&apis.ZookeeperCluster{}),
 		podsToDelete: podsToDelete,
 		cli:          c.client.KubernetesInterface().CoreV1(),
+		ctx:          c.ctx,
 	}
 
-	return func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs {
+	podHandlerBuilder := func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs {
 		return cache.ResourceEventHandlerFuncs{
 			AddFunc:    podHandler.OnAdd,
 			UpdateFunc: podHandler.OnUpdate,
 			DeleteFunc: podHandler.OnDelete,
 		}
 	}
+
+	cachedInformer.AddHandler(&corev1.Pod{}, podHandlerBuilder, 1)
 }
 
-func (c *Controller) newResourceEventHandlerBuilderForZookeeper(
-	podLister cache.GenericLister, podsToDelete set.Interface) informer.ResourceEventHandlerBuilder {
-	return func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs {
+func (c *Controller) addHandlerForZookeeper(
+	cachedInformer informer.CachedInformer, podsToDelete set.Interface) {
+	ZkHandlerBuilder := func(lister cache.GenericLister, adder informer.ResourceRateLimitingAdder) cache.ResourceEventHandlerFuncs {
 		zkSyncer := zookeeperSyncer{
 			adder:        adder,
 			client:       c.client,
-			podLister:    podLister,
+			podLister:    cachedInformer.GetLister(&corev1.Pod{}),
 			podsToDelete: podsToDelete,
+			ctx:          c.ctx,
 		}
 
 		return cache.ResourceEventHandlerFuncs{
 			AddFunc: zkSyncer.sync,
 			UpdateFunc: func(oldObj, newObj interface{}) {
+				if newObj == nil {
+					klog.Warningf("Received a nil object for %s to sync. "+
+						"Maybe it's because the corresponding resource has been deleted.",
+						oldObj.(*apis.ZookeeperCluster).GetFullName())
+					return
+				}
 				zkSyncer.sync(newObj)
 			},
 		}
 	}
+
+	cachedInformer.AddHandler(&apis.ZookeeperCluster{}, ZkHandlerBuilder, 5)
 }

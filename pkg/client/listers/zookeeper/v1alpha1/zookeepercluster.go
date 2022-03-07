@@ -27,8 +27,10 @@ import (
 )
 
 // ZookeeperClusterLister helps list ZookeeperClusters.
+// All objects returned here must be treated as read-only.
 type ZookeeperClusterLister interface {
 	// List lists all ZookeeperClusters in the indexer.
+	// Objects returned here must be treated as read-only.
 	List(selector labels.Selector) (ret []*v1alpha1.ZookeeperCluster, err error)
 	// ZookeeperClusters returns an object that can list and get ZookeeperClusters.
 	ZookeeperClusters(namespace string) ZookeeperClusterNamespaceLister
@@ -59,10 +61,13 @@ func (s *zookeeperClusterLister) ZookeeperClusters(namespace string) ZookeeperCl
 }
 
 // ZookeeperClusterNamespaceLister helps list and get ZookeeperClusters.
+// All objects returned here must be treated as read-only.
 type ZookeeperClusterNamespaceLister interface {
 	// List lists all ZookeeperClusters in the indexer for a given namespace.
+	// Objects returned here must be treated as read-only.
 	List(selector labels.Selector) (ret []*v1alpha1.ZookeeperCluster, err error)
 	// Get retrieves the ZookeeperCluster from the indexer for a given namespace and name.
+	// Objects returned here must be treated as read-only.
 	Get(name string) (*v1alpha1.ZookeeperCluster, error)
 	ZookeeperClusterNamespaceListerExpansion
 }

@@ -19,6 +19,7 @@ limitations under the License.
 package fake
 
 import (
+	"context"
 	v1alpha1 "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,7 +41,7 @@ var zookeeperclustersResource = schema.GroupVersionResource{Group: "zookeeper", 
 var zookeeperclustersKind = schema.GroupVersionKind{Group: "zookeeper", Version: "v1alpha1", Kind: "ZookeeperCluster"}
 
 // Get takes name of the zookeeperCluster, and returns the corresponding zookeeperCluster object, and an error if there is any.
-func (c *FakeZookeeperClusters) Get(name string, options v1.GetOptions) (result *v1alpha1.ZookeeperCluster, err error) {
+func (c *FakeZookeeperClusters) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1alpha1.ZookeeperCluster, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewGetAction(zookeeperclustersResource, c.ns, name), &v1alpha1.ZookeeperCluster{})
 
@@ -51,7 +52,7 @@ func (c *FakeZookeeperClusters) Get(name string, options v1.GetOptions) (result 
 }
 
 // List takes label and field selectors, and returns the list of ZookeeperClusters that match those selectors.
-func (c *FakeZookeeperClusters) List(opts v1.ListOptions) (result *v1alpha1.ZookeeperClusterList, err error) {
+func (c *FakeZookeeperClusters) List(ctx context.Context, opts v1.ListOptions) (result *v1alpha1.ZookeeperClusterList, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewListAction(zookeeperclustersResource, zookeeperclustersKind, c.ns, opts), &v1alpha1.ZookeeperClusterList{})
 
@@ -73,14 +74,14 @@ func (c *FakeZookeeperClusters) List(opts v1.ListOptions) (result *v1alpha1.Zook
 }
 
 // Watch returns a watch.Interface that watches the requested zookeeperClusters.
-func (c *FakeZookeeperClusters) Watch(opts v1.ListOptions) (watch.Interface, error) {
+func (c *FakeZookeeperClusters) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
 		InvokesWatch(testing.NewWatchAction(zookeeperclustersResource, c.ns, opts))
 
 }
 
 // Create takes the representation of a zookeeperCluster and creates it.  Returns the server's representation of the zookeeperCluster, and an error, if there is any.
-func (c *FakeZookeeperClusters) Create(zookeeperCluster *v1alpha1.ZookeeperCluster) (result *v1alpha1.ZookeeperCluster, err error) {
+func (c *FakeZookeeperClusters) Create(ctx context.Context, zookeeperCluster *v1alpha1.ZookeeperCluster, opts v1.CreateOptions) (result *v1alpha1.ZookeeperCluster, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewCreateAction(zookeeperclustersResource, c.ns, zookeeperCluster), &v1alpha1.ZookeeperCluster{})
 
@@ -91,7 +92,7 @@ func (c *FakeZookeeperClusters) Create(zookeeperCluster *v1alpha1.ZookeeperClust
 }
 
 // Update takes the representation of a zookeeperCluster and updates it. Returns the server's representation of the zookeeperCluster, and an error, if there is any.
-func (c *FakeZookeeperClusters) Update(zookeeperCluster *v1alpha1.ZookeeperCluster) (result *v1alpha1.ZookeeperCluster, err error) {
+func (c *FakeZookeeperClusters) Update(ctx context.Context, zookeeperCluster *v1alpha1.ZookeeperCluster, opts v1.UpdateOptions) (result *v1alpha1.ZookeeperCluster, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewUpdateAction(zookeeperclustersResource, c.ns, zookeeperCluster), &v1alpha1.ZookeeperCluster{})
 
@@ -103,7 +104,7 @@ func (c *FakeZookeeperClusters) Update(zookeeperCluster *v1alpha1.ZookeeperClust
 
 // UpdateStatus was generated because the type contains a Status member.
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeZookeeperClusters) UpdateStatus(zookeeperCluster *v1alpha1.ZookeeperCluster) (*v1alpha1.ZookeeperCluster, error) {
+func (c *FakeZookeeperClusters) UpdateStatus(ctx context.Context, zookeeperCluster *v1alpha1.ZookeeperCluster, opts v1.UpdateOptions) (*v1alpha1.ZookeeperCluster, error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewUpdateSubresourceAction(zookeeperclustersResource, "status", c.ns, zookeeperCluster), &v1alpha1.ZookeeperCluster{})
 
@@ -114,7 +115,7 @@ func (c *FakeZookeeperClusters) UpdateStatus(zookeeperCluster *v1alpha1.Zookeepe
 }
 
 // Delete takes name of the zookeeperCluster and deletes it. Returns an error if one occurs.
-func (c *FakeZookeeperClusters) Delete(name string, options *v1.DeleteOptions) error {
+func (c *FakeZookeeperClusters) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
 		Invokes(testing.NewDeleteAction(zookeeperclustersResource, c.ns, name), &v1alpha1.ZookeeperCluster{})
 
@@ -122,15 +123,15 @@ func (c *FakeZookeeperClusters) Delete(name string, options *v1.DeleteOptions) e
 }
 
 // DeleteCollection deletes a collection of objects.
-func (c *FakeZookeeperClusters) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(zookeeperclustersResource, c.ns, listOptions)
+func (c *FakeZookeeperClusters) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
+	action := testing.NewDeleteCollectionAction(zookeeperclustersResource, c.ns, listOpts)
 
 	_, err := c.Fake.Invokes(action, &v1alpha1.ZookeeperClusterList{})
 	return err
 }
 
 // Patch applies the patch and returns the patched zookeeperCluster.
-func (c *FakeZookeeperClusters) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.ZookeeperCluster, err error) {
+func (c *FakeZookeeperClusters) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1alpha1.ZookeeperCluster, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewPatchSubresourceAction(zookeeperclustersResource, c.ns, name, pt, data, subresources...), &v1alpha1.ZookeeperCluster{})
 

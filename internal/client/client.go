@@ -15,6 +15,8 @@
 package client
 
 import (
+	"context"
+
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
@@ -35,7 +37,7 @@ type Client interface {
 	KubernetesInterface() kubernetes.Interface
 }
 
-func NewClientOrDie(masterURL string, kubeconfigPath string) Client {
+func NewClientOrDie(ctx context.Context, masterURL string, kubeconfigPath string) Client {
 	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfigPath)
 	if err != nil {
 		panic(err)
@@ -43,7 +45,7 @@ func NewClientOrDie(masterURL string, kubeconfigPath string) Client {
 	return &clientsets{
 		config:  cfg,
 		kubeCli: kubernetes.NewForConfigOrDie(cfg),
-		crdCli:  k8sutil.NewCRDClientOrDie(cfg),
+		crdCli:  k8sutil.NewCRDClientOrDie(ctx, cfg),
 		zkCli:   versioned.NewForConfigOrDie(cfg),
 	}
 }
