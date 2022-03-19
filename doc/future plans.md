@@ -1,11 +1,7 @@
 ## Current Version
-v0.2.0
+v0.2.1
 
 ## Future plan
-### v0.2.1
-- Add validation check, whether using `OpenAPI v3 schema` or `Admission Webhook`
-- Use group v1 instead of v1beta to create CRD
-
 ### v0.3.0
 Use `controller-runtime` to refactor this project
 
@@ -46,7 +42,5 @@ Maybe use a statefulset to manage the ZooKeeper clusters.
 
 ```
 I am a starter for Go and Kubernetes, so I am developing this project for learning and fun.
-Currently I am seeking a new job, and thus the development of this project is paused.
-I will resume it after I find a new job.
 ```
 
