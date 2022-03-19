@@ -2,107 +2,76 @@ package informer
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"zookeeper-operator/pkg/util"
 )
 
-type event struct {
-	key    eventKey
-	newObj runtime.Object
-	oldObj runtime.Object
+type Event struct {
+	eventType   watch.EventType
+	resourceKey resourceKey
+	newObj      client.Object
+	oldObj      client.Object
 }
 
-func (e *event) getType() watch.EventType {
-	return e.key.getEventType()
+func (e *Event) GetType() watch.EventType {
+	return e.eventType
 }
 
-func newAdditionEvent(obj runtime.Object) *event {
-	return &event{
-		key:    newKey(watch.Added, obj),
-		newObj: obj,
-		oldObj: nil,
-	}
+func (e *Event) GetResourceKey() resourceKey {
+	return e.resourceKey
 }
 
-func newDeletionEvent(obj runtime.Object) *event {
-	return &event{
-		key:    newKey(watch.Deleted, obj),
-		newObj: nil,
-		oldObj: obj,
-	}
-}
-
-func newUpdateEvent(oldObj, newObj runtime.Object) *event {
-	return &event{
-		key:    newKey(watch.Modified, newObj),
-		newObj: newObj,
-		oldObj: oldObj,
-	}
-}
-
-type eventKey string
-
-func objToKey(obj interface{}) string {
-	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-	if err != nil {
-		panic(fmt.Sprintf("Couldn't get eventKey for object %+v: %v", obj, err))
-	}
-
-	return key
-}
-
-func newKey(eventType watch.EventType, obj runtime.Object) eventKey {
-	return eventKey(fmt.Sprintf("%s|%s", eventType, objToKey(obj)))
-}
-
-// TODO: make cache a global variable, so that we don't need to pass lister to this function
-func (s eventKey) getNewObj(lister cache.GenericLister) runtime.Object {
-	ns := s.GetNamespace()
-	name := s.GetName()
-	var err error
-	var newObj runtime.Object
-	if ns == "" {
-		newObj, err = lister.Get(name)
+func (e *Event) GetGeneration() int64 {
+	if e.newObj != nil {
+		return e.newObj.GetGeneration()
 	} else {
-		newObj, err = lister.ByNamespace(ns).Get(name)
+		return e.oldObj.GetGeneration()
 	}
-
-	if err != nil {
-		// There is a chance that the object is deleted when doing the decode, so the error might be
-		// something like "zookeepercluster.zookeeper.database.apache.com \"example-zookeeper-cluster\" not found".
-		// We will receive a deletion event later in this situation.
-		if apierrors.IsNotFound(err) {
-			return nil
-		} else {
-			panic(err)
-		}
-	}
-	return newObj
 }
 
-func (s eventKey) split() []string {
-	parts := strings.Split(string(s), "|")
-	if len(parts) != 2 {
-		panic(fmt.Sprintf("Invalid eventKey: %s", string(s)))
+func NewAdditionEvent(obj client.Object) *Event {
+	util.CheckNotNil(obj)
+	return &Event{
+		eventType:   watch.Added,
+		resourceKey: newResourceKey(obj),
+		newObj:      obj,
+		oldObj:      nil,
 	}
-	return parts
 }
 
-func (s eventKey) getEventType() watch.EventType {
-	return watch.EventType(s.split()[0])
+func NewDeletionEvent(obj client.Object) *Event {
+	util.CheckNotNil(obj)
+	return &Event{
+		eventType:   watch.Deleted,
+		resourceKey: newResourceKey(obj),
+		newObj:      nil,
+		oldObj:      obj,
+	}
 }
 
-func (s eventKey) GetNamespace() string {
-	ns, _, err := cache.SplitMetaNamespaceKey(s.split()[1])
+func NewUpdateEvent(oldObj, newObj client.Object) *Event {
+	util.CheckNotNil(oldObj)
+	util.CheckNotNil(newObj)
+	return &Event{
+		eventType:   watch.Modified,
+		resourceKey: newResourceKey(newObj),
+		newObj:      newObj,
+		oldObj:      oldObj,
+	}
+}
+
+// the format of resourceKey is "<namespace>/<name>", like "default/example-zookeeper-cluster"
+type resourceKey string
+
+func (r *resourceKey) GetNamespace() string {
+	ns, _, err := cache.SplitMetaNamespaceKey(string(*r))
 
 	if err != nil {
 		panic(err)
@@ -110,8 +79,8 @@ func (s eventKey) GetNamespace() string {
 	return ns
 }
 
-func (s eventKey) GetName() string {
-	_, name, err := cache.SplitMetaNamespaceKey(s.split()[1])
+func (r *resourceKey) GetName() string {
+	_, name, err := cache.SplitMetaNamespaceKey(string(*r))
 
 	if err != nil {
 		panic(err)
@@ -119,51 +88,46 @@ func (s eventKey) GetName() string {
 	return name
 }
 
-type keyObjDict map[eventKey]runtime.Object
+// the format of eventKey is "<namespace>/<name>", like "default/example-zookeeper-cluster"
+func newResourceKey(obj client.Object) resourceKey {
+	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
+	if err != nil {
+		panic(fmt.Sprintf("Couldn't get resourceKey for object %#v: %v", obj, err))
+	}
 
-func (s keyObjDict) has(key eventKey) bool {
-	_, exists := s[key]
+	return resourceKey(key)
+}
+
+type eventSet map[resourceKey]*Event
+
+func (k *eventSet) hasEventForTheSameResource(e *Event) bool {
+	_, exists := (*k)[e.resourceKey]
 	return exists
 }
 
-func (s keyObjDict) insert(key eventKey, oldObj runtime.Object) {
-	s[key] = oldObj
+func (k *eventSet) add(e *Event) {
+	(*k)[e.resourceKey] = e
 }
 
-func (s keyObjDict) delete(key eventKey) {
-	delete(s, key)
-}
-
-type keySet map[eventKey]struct{}
-
-func (k keySet) has(key eventKey) bool {
-	_, exists := k[key]
-	return exists
-}
-
-func (k keySet) insert(key eventKey) {
-	k[key] = struct{}{}
-}
-
-func (k keySet) delete(key eventKey) {
-	delete(k, key)
+func (k *eventSet) delete(e *Event) {
+	delete(*k, e.resourceKey)
 }
 
 // adapted from k8s.io/client-go@v0.22.2/util/workqueue/queue.go
 type typeForEventQueue struct {
 	// queue defines the order in which we will work on items. Every
-	// element of queue should be in the dirty keyObjDict and not in the
-	// processing keyObjDict.
-	queue []eventKey
+	// element of queue should be in the dirty eventSet and not in the
+	// processing eventSet.
+	queue []resourceKey
 
 	// dirty defines all of the items that need to be processed.
-	dirty keyObjDict
+	dirty eventSet
 
-	// Things that are currently being processed are in the processing keyObjDict.
-	// These things may be simultaneously in the dirty keyObjDict. When we finish
-	// processing something and remove it from this keyObjDict, we'll check if
-	// it's in the dirty keyObjDict, and if so, add it to the queue.
-	processing keySet
+	// Things that are currently being processed are in the processing eventSet.
+	// These things may be simultaneously in the dirty eventSet. When we finish
+	// processing something and remove it from this eventSet, we'll check if
+	// it's in the dirty eventSet, and if so, add it to the queue.
+	processing eventSet
 
 	cond *sync.Cond
 
@@ -174,26 +138,68 @@ type typeForEventQueue struct {
 }
 
 // Add marks item as needing processing.
-func (t *typeForEventQueue) Add(event *event) {
+func (t *typeForEventQueue) Add(event *Event) {
 	t.cond.L.Lock()
 	defer t.cond.L.Unlock()
 	if t.shuttingDown {
 		return
 	}
 
-	// Don't want to overwrite the oldObj
-	if t.dirty.has(event.key) {
-		t.cond.Signal()
-		return
-	}
+	if !t.dirty.hasEventForTheSameResource(event) {
+		t.dirty.add(event)
+		if !t.processing.hasEventForTheSameResource(event) {
+			t.queue = append(t.queue, event.resourceKey)
+			t.cond.Signal()
+		}
+	} else {
+		// in this subclause, it means the event has another event with the same resource
+		// either in t.processing or t.queue
+		newEvent := event
+		oldEvent := t.dirty[newEvent.resourceKey]
+		if oldEvent.GetGeneration() > newEvent.GetGeneration() {
+			// This may happen when the newEvent is added by the adder
+			return
+		}
 
-	t.dirty.insert(event.key, event.oldObj)
-	if t.processing.has(event.key) {
-		return
+		switch oldEvent.eventType {
+		case watch.Added:
+			switch newEvent.eventType {
+			case watch.Added: // This may happen when the newEvent is added by the adder
+				t.dirty[newEvent.resourceKey] = newEvent
+				return
+			case watch.Modified:
+				oldEvent.newObj = newEvent.newObj
+				return
+			case watch.Deleted:
+				t.dirty[newEvent.resourceKey] = newEvent
+				return
+			}
+		case watch.Modified:
+			switch newEvent.eventType {
+			case watch.Added:
+				panic(fmt.Errorf("resource %s has an %s Event after a %s Event",
+					newEvent.resourceKey, newEvent.GetType(), oldEvent.GetType()))
+			case watch.Modified:
+				oldEvent.newObj = newEvent.newObj
+				return
+			case watch.Deleted:
+				t.dirty[newEvent.resourceKey] = newEvent
+				return
+			}
+		case watch.Deleted:
+			switch newEvent.eventType {
+			case watch.Added:
+				t.dirty[newEvent.resourceKey] = newEvent
+				return
+			case watch.Modified:
+				panic(fmt.Errorf("resource %s has an %s Event after a %s Event",
+					newEvent.resourceKey, newEvent.GetType(), oldEvent.GetType()))
+			case watch.Deleted: // This may happen when the newEvent is added by the adder
+				t.dirty[newEvent.resourceKey] = newEvent
+				return
+			}
+		}
 	}
-
-	t.queue = append(t.queue, event.key)
-	t.cond.Signal()
 }
 
 // Len returns the current queue length, for informational purposes only. You
@@ -208,7 +214,7 @@ func (t *typeForEventQueue) Len() int {
 // Get blocks until it can return an item to be processed. If shutdown = true,
 // the caller should end their goroutine. You must call Done with item when you
 // have finished processing it.
-func (t *typeForEventQueue) Get() (e *event, shutdown bool) {
+func (t *typeForEventQueue) Get() (e *Event, shutdown bool) {
 	t.cond.L.Lock()
 	defer t.cond.L.Unlock()
 	for len(t.queue) == 0 && !t.shuttingDown {
@@ -219,31 +225,26 @@ func (t *typeForEventQueue) Get() (e *event, shutdown bool) {
 		return nil, true
 	}
 
-	eventkey := t.queue[0]
+	resource := t.queue[0]
 	t.queue = t.queue[1:]
-	oldObj := t.dirty[eventkey]
+	e = t.dirty[resource]
 
-	t.processing.insert(eventkey)
-	t.dirty.delete(eventkey)
+	t.processing.add(e)
+	t.dirty.delete(e)
 
-	event := event{
-		key:    eventkey,
-		oldObj: oldObj,
-		newObj: eventkey.getNewObj(t.lister),
-	}
-	return &event, false
+	return e, false
 }
 
-// Done marks event as done processing, and if it has been marked as dirty again
+// Done marks Event as done processing, and if it has been marked as dirty again
 // while it was being processed, it will be re-added to the queue for
 // re-processing.
-func (t *typeForEventQueue) Done(event *event) {
+func (t *typeForEventQueue) Done(event *Event) {
 	t.cond.L.Lock()
 	defer t.cond.L.Unlock()
 
-	t.processing.delete(event.key)
-	if t.dirty.has(event.key) {
-		t.queue = append(t.queue, event.key)
+	t.processing.delete(event)
+	if t.dirty.hasEventForTheSameResource(event) {
+		t.queue = append(t.queue, event.resourceKey)
 		t.cond.Signal()
 	}
 }
@@ -274,7 +275,7 @@ type delayingTypeForEventQueue struct {
 }
 
 // AddAfter adds the given item to the work queue after the given delay
-func (q *delayingTypeForEventQueue) AddAfter(resourceEvent *event, duration time.Duration) {
+func (q *delayingTypeForEventQueue) AddAfter(resourceEvent *Event, duration time.Duration) {
 	// don't add if we're already shutting down
 	if q.ShuttingDown() {
 		return
@@ -305,24 +306,24 @@ type rateLimitingTypeForEventQueue struct {
 }
 
 // AddRateLimited AddAfter's the item based on the time when the rate limiter says it's ok
-func (r *rateLimitingTypeForEventQueue) AddRateLimited(resourceEvent *event) {
-	r.AddAfter(resourceEvent, r.rateLimiter.When(resourceEvent))
+func (r *rateLimitingTypeForEventQueue) AddRateLimited(resourceEvent *Event) {
+	r.AddAfter(resourceEvent, r.rateLimiter.When(resourceEvent.resourceKey))
 }
 
-func (r *rateLimitingTypeForEventQueue) NumRequeues(resourceEvent *event) int {
-	return r.rateLimiter.NumRequeues(resourceEvent)
+func (r *rateLimitingTypeForEventQueue) NumRequeues(resourceEvent *Event) int {
+	return r.rateLimiter.NumRequeues(resourceEvent.resourceKey)
 }
 
-func (r *rateLimitingTypeForEventQueue) Forget(resourceEvent *event) {
-	r.rateLimiter.Forget(resourceEvent)
+func (r *rateLimitingTypeForEventQueue) Forget(resourceEvent *Event) {
+	r.rateLimiter.Forget(resourceEvent.resourceKey)
 }
 
 func newRateLimitingQueue(lister cache.GenericLister, rateLimiter workqueue.RateLimiter) *rateLimitingTypeForEventQueue {
 	return &rateLimitingTypeForEventQueue{
 		delayingTypeForEventQueue: delayingTypeForEventQueue{
 			typeForEventQueue: typeForEventQueue{
-				dirty:        keyObjDict{},
-				processing:   keySet{},
+				dirty:        eventSet{},
+				processing:   eventSet{},
 				cond:         sync.NewCond(&sync.Mutex{}),
 				shuttingDown: false,
 				lister:       lister,
@@ -333,58 +334,27 @@ func newRateLimitingQueue(lister cache.GenericLister, rateLimiter workqueue.Rate
 	}
 }
 
+// adapted from k8s.io/client-go@v0.22.2/util/workqueue/rate_limiting_queue.go
 type ResourceRateLimitingAdder interface {
-	Add(item runtime.Object)
+	Add(resourceEvent *Event)
 	Len() int
-	// AddAfter adds an item to the workqueue after the indicated duration has passed
-	AddAfter(item runtime.Object, duration time.Duration)
+	// AddAfter adds an Event to the workqueue after the indicated duration has passed
+	AddAfter(resourceEvent *Event, duration time.Duration)
 
-	// AddRateLimited adds an item to the workqueue after the rate limiter says it's ok
-	AddRateLimited(item runtime.Object)
+	// AddRateLimited adds an Event to the workqueue after the rate limiter says it's ok
+	AddRateLimited(resourceEvent *Event)
 
 	// NumRequeues returns back how many times the item was requeued
-	NumRequeues(item runtime.Object) int
+	NumRequeues(resourceEvent *Event) int
 
-	// Forget indicates that an item is finished being retried.  Doesn't matter whether it's for perm failing
+	// Forget indicates that an Event is finished being retried.  Doesn't matter whether it's for perm failing
 	// or for success, we'll stop the rate limiter from tracking it.  This only clears the `rateLimiter`, you
 	// still have to call `Done` on the queue.
-	Forget(item runtime.Object)
+	Forget(resourceEvent *Event)
 
 	// We don't want users to invoke the following APIs
-	// Get() (item runtime.Object, shutdown bool)
-	// Done(item runtime.Object)
+	// Get() (Event *Event, shutdown bool)
+	// Done(Event *Event)
 	// shutDown()
 	// ShuttingDown() bool
-}
-
-type resourceRateLimitingAdder struct {
-	eventQueue *rateLimitingTypeForEventQueue
-}
-
-func (r *resourceRateLimitingAdder) toEvent(item runtime.Object) *event {
-	return newUpdateEvent(item, item)
-}
-
-func (r *resourceRateLimitingAdder) Add(item runtime.Object) {
-	r.eventQueue.Add(r.toEvent(item))
-}
-
-func (r *resourceRateLimitingAdder) AddAfter(item runtime.Object, duration time.Duration) {
-	r.eventQueue.AddAfter(r.toEvent(item), duration)
-}
-
-func (r *resourceRateLimitingAdder) AddRateLimited(item runtime.Object) {
-	r.eventQueue.AddRateLimited(r.toEvent(item))
-}
-
-func (r *resourceRateLimitingAdder) Forget(item runtime.Object) {
-	r.eventQueue.Forget(r.toEvent(item))
-}
-
-func (r *resourceRateLimitingAdder) NumRequeues(item runtime.Object) int {
-	return r.eventQueue.NumRequeues(r.toEvent(item))
-}
-
-func (r *resourceRateLimitingAdder) Len() int {
-	return r.eventQueue.Len()
 }

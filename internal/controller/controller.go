@@ -19,8 +19,6 @@ import (
 	"time"
 
 	"gopkg.in/fatih/set.v0"
-	"k8s.io/klog/v2"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -112,12 +110,6 @@ func (c *Controller) addHandlerForZookeeper(
 		return cache.ResourceEventHandlerFuncs{
 			AddFunc: zkSyncer.sync,
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				if newObj == nil {
-					klog.Warningf("Received a nil object for %s to sync. "+
-						"Maybe it's because the corresponding resource has been deleted.",
-						oldObj.(*apis.ZookeeperCluster).GetFullName())
-					return
-				}
 				zkSyncer.sync(newObj)
 			},
 		}

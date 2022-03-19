@@ -219,6 +219,7 @@ func initCRD(client k8sutil.CRDClient) error {
 
 func newCRDForZookeeperCluster() *apiextensionsv1.CustomResourceDefinition {
 	minSize := 1.0
+	xPreserveUnknownFields := true
 
 	customResourceDefinition := &apiextensionsv1.CustomResourceDefinition{
 		ObjectMeta: metav1.ObjectMeta{
@@ -232,6 +233,9 @@ func newCRDForZookeeperCluster() *apiextensionsv1.CustomResourceDefinition {
 					Name:    api.Version,
 					Served:  true,
 					Storage: true,
+					Subresources: &apiextensionsv1.CustomResourceSubresources{
+						Status: &apiextensionsv1.CustomResourceSubresourceStatus{},
+					},
 					Schema: &apiextensionsv1.CustomResourceValidation{
 						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
 							Type:     "object",
@@ -261,6 +265,10 @@ func newCRDForZookeeperCluster() *apiextensionsv1.CustomResourceDefinition {
 											},
 										},
 									},
+								},
+								"status": {
+									Type:                   "object",
+									XPreserveUnknownFields: &xPreserveUnknownFields,
 								},
 							},
 						},

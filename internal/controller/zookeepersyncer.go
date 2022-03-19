@@ -31,7 +31,7 @@ func (z *zookeeperSyncer) sync(obj interface{}) {
 	var err error = nil
 	defer func() {
 		if err == nil && !zkCluster.IsFinished() {
-			z.adder.AddAfter(cr, retryWaitTime)
+			z.adder.AddAfter(informer.NewUpdateEvent(cr, cr), retryWaitTime)
 		}
 	}()
 
@@ -45,9 +45,9 @@ func (z *zookeeperSyncer) sync(obj interface{}) {
 	if err != nil {
 		klog.Errorf("Error happend when syncing zookeeper cluster %s: %s", cr.GetFullName(), err.Error())
 		zkcluster.ReconcileFailed.WithLabelValues(err.Error()).Inc()
-		z.adder.AddRateLimited(cr)
+		z.adder.AddRateLimited(informer.NewUpdateEvent(cr, cr))
 	} else {
-		z.adder.Forget(cr)
+		z.adder.Forget(informer.NewUpdateEvent(cr, cr))
 	}
 
 }

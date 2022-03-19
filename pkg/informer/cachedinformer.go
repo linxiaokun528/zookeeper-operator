@@ -99,12 +99,10 @@ type cachedResourceEventHandler struct {
 	gvr        schema.GroupVersionResource
 }
 
-func newCachedHandler(gvr schema.GroupVersionResource, lister cache.GenericLister, resourceEventHandlerBuilder ResourceEventHandlerBuilder) *cachedResourceEventHandler {
+func newCachedHandler(gvr schema.GroupVersionResource, lister cache.GenericLister,
+	resourceEventHandlerBuilder ResourceEventHandlerBuilder) *cachedResourceEventHandler {
 	eventQueue := newRateLimitingQueue(lister, workqueue.DefaultControllerRateLimiter())
-	adder := resourceRateLimitingAdder{
-		eventQueue: eventQueue,
-	}
-	handler := resourceEventHandlerBuilder(lister, &adder)
+	handler := resourceEventHandlerBuilder(lister, eventQueue)
 
 	result := cachedResourceEventHandler{
 		eventQueue: eventQueue,
@@ -124,17 +122,17 @@ func (i *cachedResourceEventHandler) Start(workerNum int, ctx context.Context) {
 	}()
 
 	producer := func() interface{} {
-		klog.V(4).Infof("Try to get an event from %s queue...", i.formatedGVR())
+		klog.V(4).Infof("Try to get an Event from %s queue...", i.formatedGVR())
 		event, quit := i.eventQueue.Get()
 		defer func() {
 			if r := recover(); r != nil {
-				// If errors happen in this function, the event won't be consumed. Need to mark it as done so that
+				// If errors happen in this function, the Event won't be consumed. Need to mark it as done so that
 				// it won't block following events.
 				i.eventQueue.Done(event)
 				panic(r)
 			}
 		}()
-		klog.V(4).Infof("Got event %s from %s queue: %#v", event.getType(), i.formatedGVR(), event)
+		klog.V(4).Infof("Got Event %s from %s queue: %#v", event.GetType(), i.formatedGVR(), event)
 		if quit {
 			return nil
 		}
@@ -154,21 +152,24 @@ func (i *cachedResourceEventHandler) formatedGVR() string {
 }
 
 func (i *cachedResourceEventHandler) OnAdd(obj interface{}) {
-	klog.V(2).Infof("Receive a creation event of %s for %s", i.formatedGVR(), objToKey(obj))
+	klog.V(2).Infof("Receive a creation Event of %s for %s",
+		i.formatedGVR(), newResourceKey(obj.(client.Object)))
 	if i.handler.AddFunc == nil {
 		return
 	}
 
-	i.eventQueue.Add(newAdditionEvent(obj.(runtime.Object)))
+	i.eventQueue.Add(NewAdditionEvent(obj.(client.Object)))
 }
 
 func (i *cachedResourceEventHandler) OnUpdate(oldObj, newObj interface{}) {
-	klog.V(2).Infof("Receive a update event of %s for %s", i.formatedGVR(), objToKey(newObj))
+	klog.V(2).Infof("Receive a update Event of %s for %s",
+		i.formatedGVR(), newResourceKey(newObj.(client.Object)))
+
 	if i.handler.UpdateFunc == nil {
 		return
 	}
 
-	i.eventQueue.Add(newUpdateEvent(oldObj.(runtime.Object), newObj.(runtime.Object)))
+	i.eventQueue.Add(NewUpdateEvent(oldObj.(client.Object), newObj.(client.Object)))
 }
 
 func (i *cachedResourceEventHandler) OnDelete(obj interface{}) {
@@ -176,13 +177,14 @@ func (i *cachedResourceEventHandler) OnDelete(obj interface{}) {
 	if ok {
 		obj = tombstone.Obj
 	}
-	klog.V(2).Infof("Receive a deletion event of %s for %s", i.formatedGVR(), objToKey(obj))
+	klog.V(2).Infof("Receive a deletion Event of %s for %s",
+		i.formatedGVR(), newResourceKey(obj.(client.Object)))
 
 	if i.handler.DeleteFunc == nil {
 		return
 	}
 
-	i.eventQueue.Add(newDeletionEvent(obj.(runtime.Object)))
+	i.eventQueue.Add(NewDeletionEvent(obj.(client.Object)))
 }
 
 func (i *cachedResourceEventHandler) consume(item interface{}) {
@@ -190,18 +192,21 @@ func (i *cachedResourceEventHandler) consume(item interface{}) {
 		return
 	}
 
-	event := item.(*event)
+	event := item.(*Event)
 	defer i.eventQueue.Done(event)
 
-	if event.getType() == watch.Deleted {
+	// Make sure when handler.OnDelete/handler.OnUpdate/handler.OnAdd returns, the corresponding operation is done.
+	// (don't use routine to do some latent jobs)
+	// Otherwise we may have more than one Event for the same resource at the same time.
+	if event.GetType() == watch.Deleted {
 		i.handler.OnDelete(event.oldObj)
 	} else {
-		// Actually, I don't think 'event.newObj.(metav1.Object).GetDeletionTimestamp() != nil' will happen.
+		// Actually, I don't think 'Event.newObj.(metav1.Object).GetDeletionTimestamp() != nil' will happen.
 		if event.newObj == nil || event.newObj.(metav1.Object).GetDeletionTimestamp() != nil {
 			return
 		}
 
-		if event.getType() == watch.Modified {
+		if event.GetType() == watch.Modified {
 			i.handler.OnUpdate(event.oldObj, event.newObj)
 		} else {
 			i.handler.OnAdd(event.newObj)

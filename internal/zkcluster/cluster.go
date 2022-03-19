@@ -78,9 +78,7 @@ func (c *Cluster) updateStatus() error {
 		}
 
 		newZkCr.Status = c.zkCR.Status
-		// We are supposed to use UpdateStatus here. But we don't have a status resource yet.
-		// TODO: add a default value to the status in CRD
-		newZkCr, err = c.client.ZookeeperCluster().Update(c.ctx, newZkCr, metav1.UpdateOptions{})
+		newZkCr, err = c.client.ZookeeperCluster().UpdateStatus(c.ctx, newZkCr, metav1.UpdateOptions{})
 		if err == nil {
 			klog.Infof("Status of zookeeper cluster %s updated successfully", c.zkCR.GetFullName())
 		} else {

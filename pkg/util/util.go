@@ -13,3 +13,9 @@ func GetEnvOrDie(name string) string {
 
 	return value
 }
+
+func CheckNotNil(obj interface{}) {
+	if obj == nil {
+		panic(fmt.Errorf("obj should not be nil."))
+	}
+}
