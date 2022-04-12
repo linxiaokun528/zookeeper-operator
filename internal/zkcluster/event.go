@@ -27,7 +27,7 @@ import (
 )
 
 func (c *Cluster) createEvent(event *v1.Event) error {
-	_, err := c.client.Event().Create(c.ctx, event, metav1.CreateOptions{})
+	err := c.client.Create(c.ctx, event)
 	if err != nil {
 		klog.Errorf("Failed to create event for \"%s\": %v", event.Message, err)
 	}

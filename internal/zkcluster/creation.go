@@ -1,6 +1,7 @@
 package zkcluster
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
 func (c *Cluster) create() (err error) {
@@ -21,11 +24,16 @@ func (c *Cluster) create() (err error) {
 	c.logClusterCreation()
 	defer func() {
 		if err == nil {
-			klog.Infof("Zookeeper cluster %v created successfully", c.zkCR.GetFullName())
+			klog.Infof("Zookeeper cluster %v created successfully", c.zkCR.GetNamespacedName())
 		}
 	}()
 
-	if err = c.setupServices(); err != nil {
+	clusterService := clusterService{
+		zkCR:   c.zkCR,
+		client: c.client,
+		ctx:    c.ctx,
+	}
+	if err = clusterService.setupServices(); err != nil {
 		return fmt.Errorf("zkCR create: failed to setup service: %v", err)
 	}
 
@@ -45,39 +53,45 @@ func (c *Cluster) logClusterCreation() {
 	}
 }
 
-func (c *Cluster) setupServices() error {
-	client_svc := newClientService(c.zkCR.Name)
+type clusterService struct {
+	zkCR   *api.ZookeeperCluster
+	client client.Client
+	ctx    context.Context
+}
+
+func (c *clusterService) setupServices() error {
+	client_svc := c.newClientService(c.zkCR.Namespace, c.zkCR.Name)
 	err := c.createService(client_svc)
 	if err != nil {
 		return err
 	}
 
-	peer_svc := newPeerService(c.zkCR.Name)
+	peer_svc := c.newPeerService(c.zkCR.Namespace, c.zkCR.Name)
 
 	return c.createService(peer_svc)
 }
 
-func (c *Cluster) createService(service *v1.Service) error {
+func (c *clusterService) createService(service *v1.Service) error {
 	service.OwnerReferences = append(service.OwnerReferences, c.zkCR.AsOwner())
 
-	_, err := c.client.Service().Create(c.ctx, service, metav1.CreateOptions{})
+	err := c.client.Create(c.ctx, service)
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
 	return nil
 }
 
-func newClientService(clusterName string) *v1.Service {
+func (c *clusterService) newClientService(namespace, clusterName string) *v1.Service {
 	ports := []v1.ServicePort{{
 		Name:       "zkclient",
 		Port:       zookeeperClientPort,
 		TargetPort: intstr.FromInt(zookeeperClientPort),
 		Protocol:   v1.ProtocolTCP,
 	}}
-	return newService(clusterName+"-zkclient", clusterName, "", ports)
+	return c.newService(namespace, clusterName+"-zkclient", clusterName, "", ports)
 }
 
-func newPeerService(clusterName string) *v1.Service {
+func (c *clusterService) newPeerService(namespace, clusterName string) *v1.Service {
 	ports := []v1.ServicePort{{
 		Name:       "zkclient",
 		Port:       zookeeperClientPort,
@@ -95,15 +109,16 @@ func newPeerService(clusterName string) *v1.Service {
 		Protocol:   v1.ProtocolTCP,
 	}}
 
-	return newService(clusterName, clusterName, v1.ClusterIPNone, ports)
+	return c.newService(namespace, clusterName, clusterName, v1.ClusterIPNone, ports)
 }
 
-func newService(svcName, clusterName, clusterIP string, ports []v1.ServicePort) *v1.Service {
+func (c *clusterService) newService(namespace, svcName, clusterName, clusterIP string, ports []v1.ServicePort) *v1.Service {
 	labels := labelsForCluster(clusterName)
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   svcName,
-			Labels: labels,
+			Namespace: namespace,
+			Name:      svcName,
+			Labels:    labels,
 		},
 		Spec: v1.ServiceSpec{
 			Ports:                    ports,

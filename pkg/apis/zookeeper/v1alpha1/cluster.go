@@ -16,9 +16,9 @@ package v1alpha1
 
 import (
 	"encoding/json"
-	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -47,8 +47,11 @@ type ZookeeperCluster struct {
 	Status            *ClusterStatus `json:"status"`
 }
 
-func (c *ZookeeperCluster) GetFullName() string {
-	return fmt.Sprintf("%s/%s", c.Namespace, c.Name)
+func (c *ZookeeperCluster) GetNamespacedName() types.NamespacedName {
+	return types.NamespacedName{
+		Namespace: c.Namespace,
+		Name:      c.Name,
+	}
 }
 
 func (c *ZookeeperCluster) AsOwner() metav1.OwnerReference {

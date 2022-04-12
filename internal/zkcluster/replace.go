@@ -10,11 +10,11 @@ import (
 )
 
 func (c *Cluster) ReplaceStoppedMembers() (err error) {
-	klog.Infof("Replacing stopped members for %v: %v...", c.zkCR.GetFullName(), c.zkCR.Status.Members.Stopped)
+	klog.Infof("Replacing stopped members for %v: %v...", c.zkCR.GetNamespacedName(), c.zkCR.Status.Members.Stopped)
 	defer func() {
 		if err == nil {
 			klog.Infof("Stopped members for %v are successfully replaced: %v",
-				c.zkCR.GetFullName(), c.zkCR.Status.Members.Stopped)
+				c.zkCR.GetNamespacedName(), c.zkCR.Status.Members.Stopped)
 		}
 	}()
 

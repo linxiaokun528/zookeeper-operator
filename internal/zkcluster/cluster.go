@@ -20,35 +20,27 @@ import (
 	"sync"
 
 	"gopkg.in/fatih/set.v0"
-	"k8s.io/client-go/tools/cache"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetretry "k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	client2 "zookeeper-operator/internal/client"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/errors"
 )
 
 type Cluster struct {
-	client       client2.CRClient
+	client       client.Client
 	zkCR         *api.ZookeeperCluster
 	locker       sync.Locker
-	podLister    cache.GenericLister
 	podsToDelete set.Interface
 	ctx          context.Context
 }
 
-func New(
-	ctx context.Context,
-	client client2.CRClient, zkCR *api.ZookeeperCluster,
-	podLister cache.GenericLister, podsToDelete set.Interface) *Cluster {
+func New(ctx context.Context, client client.Client, zkCR *api.ZookeeperCluster, podsToDelete set.Interface) *Cluster {
 	c := &Cluster{
 		client:       client,
 		zkCR:         zkCR,
 		locker:       &sync.Mutex{},
-		podLister:    podLister,
 		podsToDelete: podsToDelete,
 		ctx:          ctx,
 	}
@@ -64,7 +56,7 @@ func (c *Cluster) SyncAndUpdateStatus() (err error) {
 			err = errors.NewCompoundedError(err, update_err)
 		} else {
 			klog.Infof("Status not changed. Don't need to update the status of zookeeper cluster %s",
-				c.zkCR.GetFullName())
+				c.zkCR.GetNamespacedName())
 		}
 	}()
 	return c.sync()
@@ -72,25 +64,30 @@ func (c *Cluster) SyncAndUpdateStatus() (err error) {
 
 func (c *Cluster) updateStatus() error {
 	return clientsetretry.RetryOnConflict(clientsetretry.DefaultRetry, func() error {
-		newZkCr, err := c.client.ZookeeperCluster().Get(c.ctx, c.zkCR.Name, metav1.GetOptions{})
+		// Although status is a subresource, updates in spec will still conflict with the update of status,
+		// because the ResourceVersion has been updated.
+		// so we still need to get the newest CR before update status
+		status := c.zkCR.Status
+		err := c.client.Get(c.ctx, c.zkCR.GetNamespacedName(), c.zkCR)
 		if err != nil {
 			return err
 		}
 
-		newZkCr.Status = c.zkCR.Status
-		newZkCr, err = c.client.ZookeeperCluster().UpdateStatus(c.ctx, newZkCr, metav1.UpdateOptions{})
+		c.zkCR.Status = status
+
+		err = c.client.Status().Update(c.ctx, c.zkCR)
 		if err == nil {
-			klog.Infof("Status of zookeeper cluster %s updated successfully", c.zkCR.GetFullName())
+			klog.Infof("Status of zookeeper cluster %s updated successfully", c.zkCR.GetNamespacedName())
 		} else {
-			klog.Warningf("Failed to update the status of zookeeper cluster %s: %v", c.zkCR.GetFullName(), err)
+			klog.Warningf("Failed to update the status of zookeeper cluster %s: %v", c.zkCR.GetNamespacedName(), err)
 		}
 		return err
 	})
 }
 
 func (c *Cluster) sync() error {
-	klog.Infof("Start syncing zookeeper cluster %v", c.zkCR.GetFullName())
-	defer klog.Infof("Finish syncing zookeeper cluster %v", c.zkCR.GetFullName())
+	klog.Infof("Start syncing zookeeper cluster %v", c.zkCR.GetNamespacedName())
+	defer klog.Infof("Finish syncing zookeeper cluster %v", c.zkCR.GetNamespacedName())
 
 	if c.zkCR.Status.StartTime == nil {
 		// TODO: consider the situation that the services are deleted
@@ -113,7 +110,7 @@ func (c *Cluster) sync() error {
 
 	if members.Unready.Size() > 0 {
 		klog.Infof("Skip syncing for zookeeper cluster %v. Some pods are unready: %v",
-			c.zkCR.GetFullName(), members.Unready.GetMemberNames())
+			c.zkCR.GetNamespacedName(), members.Unready.GetMemberNames())
 		ReconcileFailed.WithLabelValues("not all pods are ready").Inc()
 		return nil
 	}
@@ -121,7 +118,7 @@ func (c *Cluster) sync() error {
 	if members.Stopped.Size() > 0 {
 		c.zkCR.Status.AppendRecoveringCondition(&members.Stopped)
 		klog.Warningf("There are stopped members of zookeeper cluster %v: %v",
-			c.zkCR.GetFullName(), members.Stopped)
+			c.zkCR.GetNamespacedName(), members.Stopped)
 		err = c.ReplaceStoppedMembers()
 		if err != nil {
 			return err

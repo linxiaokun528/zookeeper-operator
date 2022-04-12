@@ -17,23 +17,25 @@ package zkcluster
 import (
 	"fmt"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"zookeeper-operator/pkg/k8sutil"
 
-	k8sutil "zookeeper-operator/internal/util/k8s"
+	internalutil "zookeeper-operator/internal/util/k8s"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 )
 
 func (c *Cluster) beginUpgrade() {
 	klog.Infof("Upgrading zookeeper cluster %v from %s to %s...",
-		c.zkCR.GetFullName(), c.zkCR.Status.CurrentVersion, c.zkCR.Spec.Version)
+		c.zkCR.GetNamespacedName(), c.zkCR.Status.CurrentVersion, c.zkCR.Spec.Version)
 	c.zkCR.Status.UpgradeVersionTo(c.zkCR.Spec.Version)
 }
 
 func (c *Cluster) finishUpgrade() {
 	c.zkCR.Status.SetVersion(c.zkCR.Status.TargetVersion)
 	klog.Infof("Zookeeper cluster %v upgraded from %s to %s successfully.",
-		c.zkCR.GetFullName(), c.zkCR.Status.CurrentVersion, c.zkCR.Status.TargetVersion)
+		c.zkCR.GetNamespacedName(), c.zkCR.Status.CurrentVersion, c.zkCR.Status.TargetVersion)
 }
 
 func (c *Cluster) pickOneOldMember() *api.Member {
@@ -51,23 +53,28 @@ func (c *Cluster) upgradeOneMember() error {
 	if member == nil {
 		return nil
 	}
-	return c.upgradeMember(member.Name())
+	return c.upgradeMember(member)
 }
 
-func (c *Cluster) upgradeMember(memberName string) error {
-	pod, err := c.client.Pod().Get(c.ctx, memberName, metav1.GetOptions{})
+func (c *Cluster) upgradeMember(m *api.Member) error {
+	pod := &corev1.Pod{}
+	err := c.client.Get(c.ctx, client.ObjectKey{
+		Namespace: m.Namespace(),
+		Name:      m.Name(),
+	}, pod)
+	memberName := k8sutil.GetNamespacedName(pod)
 	if err != nil {
 		return fmt.Errorf("fail to get pod (%s): %v", memberName, err)
 	}
 	oldpod := pod.DeepCopy()
 
-	klog.Infof("Upgrading the zookeeper member %v from %s to %s", memberName, k8sutil.GetZookeeperVersion(pod), c.zkCR.Spec.Version)
-	k8sutil.SetZookeeperVersion(pod, c.zkCR.Spec.Version)
+	klog.Infof("Upgrading the zookeeper member %v from %s to %s", memberName, internalutil.GetZookeeperVersion(pod), c.zkCR.Spec.Version)
+	internalutil.SetZookeeperVersion(pod, c.zkCR.Spec.Version)
 
-	_, err = c.client.Pod().Update(c.ctx, pod, metav1.UpdateOptions{})
+	err = c.client.Update(c.ctx, pod)
 	if err != nil {
 		return fmt.Errorf("fail to update the zookeeper member (%s): %v", memberName, err)
 	}
 
-	return c.createEvent(c.newMemberUpgradedEvent(memberName, k8sutil.GetZookeeperVersion(oldpod), c.zkCR.Spec.Version))
+	return c.createEvent(c.newMemberUpgradedEvent(memberName, internalutil.GetZookeeperVersion(oldpod), c.zkCR.Spec.Version))
 }

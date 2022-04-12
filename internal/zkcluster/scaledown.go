@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
@@ -13,10 +14,10 @@ import (
 
 func (c *Cluster) scaleDown() (err error) {
 	klog.Infof("Scaling down zookeeper cluster %v(current cluster size: %d, desired cluster size: %d)...",
-		c.zkCR.GetFullName(), c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
+		c.zkCR.GetNamespacedName(), c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
 	defer func() {
 		if err == nil {
-			klog.Infof("Zookeeper cluster %v scaled down successfully", c.zkCR.GetFullName())
+			klog.Infof("Zookeeper cluster %v scaled down successfully", c.zkCR.GetNamespacedName())
 		}
 	}()
 
@@ -56,7 +57,8 @@ func (c *Cluster) scaleDown() (err error) {
 func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 	podName := fmt.Sprintf("%s/%s", c.zkCR.Namespace, m.Name())
 	c.podsToDelete.Add(podName)
-	if err := c.client.Pod().Delete(c.ctx, m.Name(), metav1.DeleteOptions{}); err != nil {
+	err = c.client.Delete(c.ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: m.Namespace(), Name: m.Name()}})
+	if err != nil {
 		c.podsToDelete.Remove(podName)
 		if !apierrors.IsNotFound(err) {
 			return err

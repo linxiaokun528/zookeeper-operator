@@ -74,6 +74,7 @@ func newZookeeperPod(m *api.Member, clusterMembers *api.Members, zkCR *api.Zooke
 	fsGroup := podUID
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
+			Namespace:   m.Namespace(),
 			Name:        m.Name(),
 			Labels:      labels,
 			Annotations: map[string]string{},
@@ -120,7 +121,7 @@ else
         exit 1
 fi`
 	return &v1.Probe{
-		Handler: v1.Handler{
+		ProbeHandler: v1.ProbeHandler{
 			Exec: &v1.ExecAction{
 				Command: []string{"/bin/bash", "-c", cmd},
 			},

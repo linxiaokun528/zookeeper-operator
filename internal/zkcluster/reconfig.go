@@ -29,11 +29,11 @@ func (c *Cluster) reconfig() (err error) {
 	all.Update(&c.zkCR.Status.Members.Ready)
 
 	klog.Infof("Reconfiguring zookeeper cluster %s: %v",
-		c.zkCR.GetFullName(), all.GetClusterConfig())
+		c.zkCR.GetNamespacedName(), all.GetClusterConfig())
 	defer func() {
 		if err == nil {
 			klog.Infof("Zookeeper cluster %s are successfully reconfigured: %v",
-				c.zkCR.GetFullName(), all.GetClusterConfig())
+				c.zkCR.GetNamespacedName(), all.GetClusterConfig())
 		}
 	}()
 

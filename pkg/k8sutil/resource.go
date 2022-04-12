@@ -1,11 +1,9 @@
 package k8sutil
 
 import (
-	"fmt"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func GetFullName(obj metav1.Object) string {
-	return fmt.Sprintf("%s/%s", obj.GetNamespace(), obj.GetName())
+func GetNamespacedName(obj client.Object) string {
+	return client.ObjectKeyFromObject(obj).String()
 }

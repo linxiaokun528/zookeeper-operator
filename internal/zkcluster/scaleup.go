@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
@@ -13,7 +12,7 @@ import (
 
 func (c *Cluster) beginScaleUp() (err error) {
 	klog.Infof("Scaling up zookeeper cluster %v(current cluster size: %d, desired cluster size: %d)...",
-		c.zkCR.GetFullName(), c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
+		c.zkCR.GetNamespacedName(), c.zkCR.Status.Members.Running.Size(), c.zkCR.Spec.Size)
 
 	existing := c.zkCR.Status.Members.Running
 	existing.Update(&c.zkCR.Status.Members.Ready)
@@ -22,7 +21,7 @@ func (c *Cluster) beginScaleUp() (err error) {
 	defer func() {
 		if err == nil {
 			klog.Infof("New members are added into zookeeper cluster %v successfully: %v",
-				c.zkCR.GetFullName(), newMembers.GetMemberNames())
+				c.zkCR.GetNamespacedName(), newMembers.GetMemberNames())
 		}
 	}()
 
@@ -56,7 +55,7 @@ func (c *Cluster) beginScaleUp() (err error) {
 func (c *Cluster) finishScaleUp() (err error) {
 	defer func() {
 		if err == nil {
-			klog.Infof("Zookeeper cluster %v scaled up successfully", c.zkCR.GetFullName())
+			klog.Infof("Zookeeper cluster %v scaled up successfully", c.zkCR.GetNamespacedName())
 		}
 	}()
 	err = c.reconfig()
@@ -72,7 +71,7 @@ func (c *Cluster) addOneMember(m *api.Member, lastCommittedMembers *api.Members)
 	allClusterMembers := lastCommittedMembers.Copy()
 	allClusterMembers.Add(m)
 	pod := newZookeeperPod(m, allClusterMembers, c.zkCR)
-	_, err := c.client.Pod().Create(c.ctx, pod, metav1.CreateOptions{})
+	err := c.client.Create(c.ctx, pod)
 	if err != nil {
 		return fmt.Errorf("Failed to create member's pod (%s): %v", m.Name(), err)
 	}
