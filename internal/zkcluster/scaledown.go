@@ -2,11 +2,11 @@ package zkcluster
 
 import (
 	"fmt"
-	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
 	"zookeeper-operator/pkg/errors"
@@ -32,22 +32,32 @@ func (c *Cluster) scaleDown() (err error) {
 	}
 
 	errCh := make(chan error, membersToRemove.Size())
-	wait := sync.WaitGroup{}
-	wait.Add(membersToRemove.Size())
+	group := wait.Group{}
 
 	for _, m := range membersToRemove.GetElements() {
-		go func(member *api.Member) {
-			defer wait.Done()
-			err := c.removeOneMember(member)
+		//for _, t := range []int{1, 2, 3, 4} {
+		//	go func() {
+		//		fmt.Println(t)  // result: 4 4 4 4
+		//	}()
+		//}
+		//for _, t := range []int{1, 2, 3, 4} {
+		//	tmp := t
+		//	go func() {
+		//		fmt.Println(tmp) // result: 1 2 3 4 (the order may change)
+		//	}()
+		//}
+		tmp := m
+		group.Start(func() {
+			err := c.removeOneMember(tmp)
 			if err != nil {
 				errCh <- err
 				c.locker.Lock()
-				c.zkCR.Status.Members.Running.Add(member)
+				c.zkCR.Status.Members.Running.Add(tmp)
 				c.locker.Unlock()
 			}
-		}(m)
+		})
 	}
-	wait.Wait()
+	group.Wait()
 	close(errCh)
 
 	return errors.NewCompoundedErrorFromChan(errCh)
@@ -73,6 +83,6 @@ func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 			}
 		}
 	*/
-
+	klog.Infof("Deleted member (%s)", m.Name())
 	return c.createEvent(c.newMemberRemoveEvent(m.Name()))
 }

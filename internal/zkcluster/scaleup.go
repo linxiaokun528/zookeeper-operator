@@ -2,8 +2,8 @@ package zkcluster
 
 import (
 	"fmt"
-	"sync"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
@@ -25,28 +25,37 @@ func (c *Cluster) beginScaleUp() (err error) {
 		}
 	}()
 
-	wait := sync.WaitGroup{}
-	wait.Add(newMembers.Size())
-	errCh := make(chan error, newMembers.Size())
-
 	lastCommittedMembers := &c.zkCR.Status.Members.Running
 	if c.zkCR.Status.Members.Running.Size() == 0 {
 		lastCommittedMembers = newMembers
 	}
 
+	group := wait.Group{}
+	errCh := make(chan error, newMembers.Size())
 	for _, member := range newMembers.GetElements() {
-		go func(newMember *api.Member, lastCommittedMembers *api.Members) {
-			defer wait.Done()
-			err := c.addOneMember(newMember, lastCommittedMembers)
+		//for _, t := range []int{1, 2, 3, 4} {
+		//	go func() {
+		//		fmt.Println(t)  // result: 4 4 4 4
+		//	}()
+		//}
+		//for _, t := range []int{1, 2, 3, 4} {
+		//	tmp := t
+		//	go func() {
+		//		fmt.Println(tmp) // result: 1 2 3 4 (the order may change)
+		//	}()
+		//}
+		tmp := member
+		group.Start(func() {
+			err := c.addOneMember(tmp, lastCommittedMembers)
 			if err != nil {
 				errCh <- err
 				c.locker.Lock()
-				c.zkCR.Status.Members.Unready.Remove(member.ID())
+				c.zkCR.Status.Members.Unready.Remove(tmp.ID())
 				c.locker.Unlock()
 			}
-		}(member, lastCommittedMembers)
+		})
 	}
-	wait.Wait()
+	group.Wait()
 	close(errCh)
 
 	return errors.NewCompoundedErrorFromChan(errCh)

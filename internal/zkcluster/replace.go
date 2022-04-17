@@ -1,8 +1,7 @@
 package zkcluster
 
 import (
-	"sync"
-
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
 	api "zookeeper-operator/pkg/apis/zookeeper/v1alpha1"
@@ -21,19 +20,29 @@ func (c *Cluster) ReplaceStoppedMembers() (err error) {
 	all := c.zkCR.Status.Members.Running.Copy()
 	all.Update(&c.zkCR.Status.Members.Stopped)
 
-	wait := sync.WaitGroup{}
-	wait.Add(c.zkCR.Status.Members.Stopped.Size())
+	group := wait.Group{}
 	errCh := make(chan error, c.zkCR.Status.Members.Stopped.Size())
 	for _, dead_member := range c.zkCR.Status.Members.Stopped.GetElements() {
-		go func() {
-			defer wait.Done()
-			err := c.replaceOneStoppedMember(dead_member, all)
+		//for _, t := range []int{1, 2, 3, 4} {
+		//	go func() {
+		//		fmt.Println(t)  // result: 4 4 4 4
+		//	}()
+		//}
+		//for _, t := range []int{1, 2, 3, 4} {
+		//	tmp := t
+		//	go func() {
+		//		fmt.Println(tmp) // result: 1 2 3 4 (the order may change)
+		//	}()
+		//}
+		tmp := dead_member
+		group.Start(func() {
+			err := c.replaceOneStoppedMember(tmp, all)
 			if err != nil {
 				errCh <- err
 			}
-		}()
+		})
 	}
-	wait.Wait()
+	group.Wait()
 	close(errCh)
 
 	return errors.NewCompoundedErrorFromChan(errCh)
@@ -56,5 +65,6 @@ func (c *Cluster) replaceOneStoppedMember(toReplace *api.Member, cluster *api.Me
 	}
 	c.zkCR.Status.Members.Unready.Add(toReplace)
 
+	klog.Infof("Replaced stopped member (%s)", toReplace.Name())
 	return c.createEvent(c.newMemberReplaceEvent(toReplace.Name()))
 }

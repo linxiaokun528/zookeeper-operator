@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"reflect"
 	"runtime"
 
 	"github.com/go-zookeeper/zk"
@@ -34,12 +35,14 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/component-base/logs"
 	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/klogr"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+	"zookeeper-operator/internal/config"
 	zkcontroller "zookeeper-operator/internal/controller"
 	"zookeeper-operator/internal/util/probe"
 	"zookeeper-operator/internal/version"
@@ -81,13 +84,14 @@ func (e *loggerForGoZK) Printf(format string, args ...interface{}) {
 
 func init() {
 	logs.InitLogs()
-	defer logs.FlushLogs()
 	zk.DefaultLogger = &loggerForGoZK{}
 }
 
 var clean context.CancelFunc = nil
 
 func main() {
+	defer logs.FlushLogs()
+	defer klog.Flush()
 	klog.Infof("zookeeper-operator Version: %v", version.Version)
 	klog.Infof("Git SHA: %s", version.GitSHA)
 	klog.Infof("Go Version: %s", runtime.Version())
@@ -113,21 +117,25 @@ func main() {
 	// todo: remove this when use kubebuilder to init crd
 	k8sutil.InitCRDOrDie(mgr.GetClient(), ctx)
 
+	logPredictForZkCluster := zkcontroller.NewLogPredicate(config.PredicateLogLevel, api.SchemeGroupVersionKind)
+	logPredictForPod := zkcontroller.NewLogPredicate(config.PredicateLogLevel,
+		v1.SchemeGroupVersion.WithKind(reflect.TypeOf(v1.Pod{}).Name()))
 	podsToDelete := set.New(set.ThreadSafe)
 	err = builder.
 		ControllerManagedBy(mgr).
-		For(&api.ZookeeperCluster{}).
-		WithEventFilter(zkcontroller.NewLogPredicate(2)).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 5,
-		}).
+		For(&api.ZookeeperCluster{}, builder.WithPredicates(logPredictForZkCluster)).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 5}).
 		Watches(&source.Kind{Type: &v1.Pod{}},
 			zkcontroller.NewZkPodEventHandler(ctx, podsToDelete),
-			builder.WithPredicates(zkcontroller.NewZkPodPredicate(ctx), zkcontroller.NewLogPredicate(2))).
+			builder.WithPredicates(zkcontroller.NewZkPodPredicate(ctx), logPredictForPod)).
 		Complete(zkcontroller.NewZookeeperReconciler(podsToDelete))
 	dealWithError(err)
 
 	err = mgr.Start(ctx)
+	// todo: is err is"leader election lost", we may want to restart again
+	// in early version, do we symply return when election lost?
+	// We can use debug to test the election lost, because we can have
+	// "failed to renew lease default/lshaokun-a01.vmware.com: timed out waiting for the condition"
 	dealWithError(err)
 }
 
@@ -169,6 +177,7 @@ func getManagerOrDie() manager.Manager {
 	// todo: remove this when use kubebuilder to init crd
 	options.ClientDisableCacheFor = []client.Object{&apiextensionsv1.CustomResourceDefinition{}}
 	options.Namespace = namespace
+	options.Logger = klogr.New()
 
 	mgr, err := manager.New(getConfigOrDie(), *options)
 	if err != nil {
@@ -180,7 +189,6 @@ func getManagerOrDie() manager.Manager {
 func getManagerOptionsForStandaloneMode() *manager.Options {
 	return &manager.Options{
 		LeaderElection: false,
-		// Logger: todo: too see if the event is printed
 	}
 }
 
@@ -196,11 +204,3 @@ func getManagerOptionsForClusterMode() *manager.Options {
 		LeaderElectionNamespace:    namespace,
 	}
 }
-
-// TODO: test if event is recorded in log like before
-//func createRecorder(kubecli kubernetes.Interface) record.EventRecorder {
-//	eventBroadcaster := record.NewBroadcaster()
-//	eventBroadcaster.StartLogging(klog.Infof)
-//	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: v1core.New(kubecli.CoreV1().RESTClient()).Events(namespace)})
-//	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: ComponentName})
-//}
