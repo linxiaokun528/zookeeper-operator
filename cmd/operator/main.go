@@ -132,10 +132,6 @@ func main() {
 	dealWithError(err)
 
 	err = mgr.Start(ctx)
-	// todo: is err is"leader election lost", we may want to restart again
-	// in early version, do we symply return when election lost?
-	// We can use debug to test the election lost, because we can have
-	// "failed to renew lease default/lshaokun-a01.vmware.com: timed out waiting for the condition"
 	dealWithError(err)
 }
 

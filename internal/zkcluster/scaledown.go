@@ -31,7 +31,7 @@ func (c *Cluster) scaleDown() (err error) {
 		return err
 	}
 
-	errCh := make(chan error, membersToRemove.Size())
+	errCh := make(chan error, membersToRemove.Size()) // todo: use errgroup instead
 	group := wait.Group{}
 
 	for _, m := range membersToRemove.GetElements() {

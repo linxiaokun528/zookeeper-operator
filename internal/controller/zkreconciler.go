@@ -6,7 +6,6 @@ import (
 
 	"gopkg.in/fatih/set.v0"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -18,7 +17,6 @@ const retryWaitTime = 30 * time.Second
 
 type ZookeeperReconciler struct {
 	client       client.Client
-	podLister    cache.GenericLister // todo: replace this with client
 	podsToDelete set.Interface
 }
 
@@ -28,9 +26,10 @@ func NewZookeeperReconciler(podsToDelete set.Interface) *ZookeeperReconciler {
 	}
 }
 
-func (z *ZookeeperReconciler) Reconcile(ctx context.Context, req reconcile.Request) (result reconcile.Result, err error) {
+func (z *ZookeeperReconciler) Reconcile(ctx context.Context,
+	req reconcile.Request) (result reconcile.Result, err error) {
 	cr := api.ZookeeperCluster{}
-	err = z.client.Get(ctx, req.NamespacedName, &cr) // TODO: wrap with generics
+	err = z.client.Get(ctx, req.NamespacedName, &cr) // see if the client will support generics in the future
 	if apierrors.IsNotFound(err) {
 		return result, nil
 	}

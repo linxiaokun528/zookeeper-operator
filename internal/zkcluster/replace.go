@@ -21,7 +21,7 @@ func (c *Cluster) ReplaceStoppedMembers() (err error) {
 	all.Update(&c.zkCR.Status.Members.Stopped)
 
 	group := wait.Group{}
-	errCh := make(chan error, c.zkCR.Status.Members.Stopped.Size())
+	errCh := make(chan error, c.zkCR.Status.Members.Stopped.Size()) // todo: use errgroup instead
 	for _, dead_member := range c.zkCR.Status.Members.Stopped.GetElements() {
 		//for _, t := range []int{1, 2, 3, 4} {
 		//	go func() {

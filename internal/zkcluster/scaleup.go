@@ -31,7 +31,7 @@ func (c *Cluster) beginScaleUp() (err error) {
 	}
 
 	group := wait.Group{}
-	errCh := make(chan error, newMembers.Size())
+	errCh := make(chan error, newMembers.Size()) // todo: use errgroup instead
 	for _, member := range newMembers.GetElements() {
 		//for _, t := range []int{1, 2, 3, 4} {
 		//	go func() {

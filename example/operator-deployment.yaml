@@ -1,9 +1,12 @@
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: zookeeper-operator
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      name: zookeeper-operator
   template:
     metadata:
       labels:
@@ -18,4 +21,4 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
         command:  ["zookeeper-operator"]
-        args: ["--namespace=$(MY_POD_NAMESPACE)", "--leader-elect=false"]
+        args: ["--namespace=$(MY_POD_NAMESPACE)", "--leader-elect=true"]

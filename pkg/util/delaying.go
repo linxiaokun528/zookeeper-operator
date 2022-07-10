@@ -15,7 +15,7 @@ type waitFor struct {
 	readyAt  time.Time
 }
 
-func waitForComporator(first, second interface{}) bool {
+func waitForComparator(first, second interface{}) bool {
 	firstWaitFor := first.(*waitFor)
 	secondWaitFor := second.(*waitFor)
 	return firstWaitFor.readyAt.Before(secondWaitFor.readyAt)
@@ -42,7 +42,7 @@ type DelayingExecutor struct {
 }
 
 func NewDelayingExecutor(size int) *DelayingExecutor {
-	return newDelayingExecutor(size, NewPriorityQueue(waitForComporator))
+	return newDelayingExecutor(size, NewPriorityQueue(waitForComparator))
 }
 
 func newDelayingExecutor(size int, priorityQueue PriorityQueue) *DelayingExecutor {
@@ -165,7 +165,7 @@ type DelayingChannel struct {
 func NewDelayingChannel(repeated bool, size int) *DelayingChannel {
 	var priorityQueue PriorityQueue
 	if repeated {
-		priorityQueue = NewPriorityQueue(waitForComporator)
+		priorityQueue = NewPriorityQueue(waitForComparator)
 	} else {
 		hasher := func(obj interface{}) interface{} {
 			return obj.(*waitFor).executee.(*delayingObj).obj
@@ -173,7 +173,7 @@ func NewDelayingChannel(repeated bool, size int) *DelayingChannel {
 		repeator := func(original, new interface{}) bool {
 			return original.(*waitFor).readyAt.After(new.(*waitFor).readyAt)
 		}
-		priorityQueue = NewPrioritySet(waitForComporator, hasher, repeator)
+		priorityQueue = NewPrioritySet(waitForComparator, hasher, repeator)
 	}
 
 	return &DelayingChannel{
