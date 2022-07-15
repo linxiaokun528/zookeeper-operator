@@ -24,8 +24,8 @@ import (
 	"runtime"
 
 	"github.com/go-zookeeper/zk"
+	"github.com/linxiaokun528/go-kit/pkg/util/collection"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"gopkg.in/fatih/set.v0"
 	v1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
@@ -120,7 +120,9 @@ func main() {
 	logPredictForZkCluster := zkcontroller.NewLogPredicate(config.PredicateLogLevel, api.SchemeGroupVersionKind)
 	logPredictForPod := zkcontroller.NewLogPredicate(config.PredicateLogLevel,
 		v1.SchemeGroupVersion.WithKind(reflect.TypeOf(v1.Pod{}).Name()))
-	podsToDelete := set.New(set.ThreadSafe)
+	podsToDelete := collection.NewSet[string, string](
+		func(data string) string { return data },
+		func(first, second string) bool { return first == second })
 	err = builder.
 		ControllerManagedBy(mgr).
 		For(&api.ZookeeperCluster{}, builder.WithPredicates(logPredictForZkCluster)).

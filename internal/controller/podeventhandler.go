@@ -3,7 +3,7 @@ package controller
 import (
 	"context"
 
-	"gopkg.in/fatih/set.v0"
+	"github.com/linxiaokun528/go-kit/pkg/util/collection"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -17,13 +17,13 @@ import (
 )
 
 type zkPodEventHandler struct {
-	podsToDelete    set.Interface
+	podsToDelete    collection.Collection[string]
 	client          client.Client
 	ctx             context.Context
 	handlerForOwner handler.EnqueueRequestForOwner
 }
 
-func NewZkPodEventHandler(ctx context.Context, podsToDelete set.Interface) *zkPodEventHandler {
+func NewZkPodEventHandler(ctx context.Context, podsToDelete collection.Collection[string]) *zkPodEventHandler {
 	return &zkPodEventHandler{
 		podsToDelete: podsToDelete,
 		ctx:          ctx,
@@ -37,7 +37,7 @@ func NewZkPodEventHandler(ctx context.Context, podsToDelete set.Interface) *zkPo
 func (p *zkPodEventHandler) Delete(event event.DeleteEvent, queue workqueue.RateLimitingInterface) {
 	pod := event.Object.(*v1.Pod)
 	if p.podsToDelete.Has(k8sutil.GetNamespacedName(pod)) {
-		p.podsToDelete.Remove(k8sutil.GetNamespacedName(pod))
+		p.podsToDelete.RemoveFirst(k8sutil.GetNamespacedName(pod))
 		return
 	} else {
 		klog.Infof("Pod deletion observed: %s/%s", pod.Namespace, pod.Name)

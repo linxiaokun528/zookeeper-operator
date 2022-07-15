@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"gopkg.in/fatih/set.v0"
+	"github.com/linxiaokun528/go-kit/pkg/util/collection"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,10 +17,10 @@ const retryWaitTime = 30 * time.Second
 
 type ZookeeperReconciler struct {
 	client       client.Client
-	podsToDelete set.Interface
+	podsToDelete collection.Collection[string]
 }
 
-func NewZookeeperReconciler(podsToDelete set.Interface) *ZookeeperReconciler {
+func NewZookeeperReconciler(podsToDelete collection.Collection[string]) *ZookeeperReconciler {
 	return &ZookeeperReconciler{
 		podsToDelete: podsToDelete,
 	}

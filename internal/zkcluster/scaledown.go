@@ -69,7 +69,7 @@ func (c *Cluster) removeOneMember(m *api.Member) (err error) {
 	c.podsToDelete.Add(podName)
 	err = c.client.Delete(c.ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: m.Namespace(), Name: m.Name()}})
 	if err != nil {
-		c.podsToDelete.Remove(podName)
+		c.podsToDelete.RemoveFirst(podName)
 		if !apierrors.IsNotFound(err) {
 			return err
 		}

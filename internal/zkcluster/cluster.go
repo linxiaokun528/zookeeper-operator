@@ -19,7 +19,7 @@ import (
 	"reflect"
 	"sync"
 
-	"gopkg.in/fatih/set.v0"
+	"github.com/linxiaokun528/go-kit/pkg/util/collection"
 	clientsetretry "k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,11 +32,12 @@ type Cluster struct {
 	client       client.Client
 	zkCR         *api.ZookeeperCluster
 	locker       sync.Locker
-	podsToDelete set.Interface
+	podsToDelete collection.Collection[string]
 	ctx          context.Context
 }
 
-func New(ctx context.Context, client client.Client, zkCR *api.ZookeeperCluster, podsToDelete set.Interface) *Cluster {
+func New(ctx context.Context, client client.Client, zkCR *api.ZookeeperCluster,
+	podsToDelete collection.Collection[string]) *Cluster {
 	c := &Cluster{
 		client:       client,
 		zkCR:         zkCR,
